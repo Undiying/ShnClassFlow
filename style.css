@@ -817,7 +817,17 @@ html, body {
 .user-row { flex: 1; }
 .user-row > div { flex: 1; }
 
-/* ── Responsive ──────────────────────────────────────────────── */
+/* ── EDIT FORM ───────────────────────────────────────────────── */
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.edit-form .form-group {
+  margin-bottom: 12px;
+}
+
+/* ── RESPONSIVE ──────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {
   .calendar-grid {

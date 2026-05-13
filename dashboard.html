@@ -198,12 +198,16 @@
       </div>
       <div class="modal-body" id="detailBody"></div>
       <div class="modal-footer">
-        <button class="btn-ghost" onclick="closeDetailModal()">Close</button>
-        <button class="btn-danger" onclick="deleteCurrentSession()">Delete Session</button>
+        <button class="btn-ghost" id="detailCloseBtn" onclick="closeDetailModal()">Close</button>
+        <button class="btn-ghost" id="editCancelBtn" onclick="cancelEdit()" style="display:none">Cancel</button>
+        <button class="btn-primary" id="editSessionBtn" onclick="editCurrentSession()" style="display:none">Edit Session</button>
+        <button class="btn-primary" id="saveEditBtn" onclick="saveSessionEdit()" style="display:none">Save Changes</button>
+        <button class="btn-danger" id="deleteSessionBtn" onclick="deleteCurrentSession()">Delete Session</button>
       </div>
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -3,6 +3,12 @@
 //  Handles auth, state, calendar rendering, booking logic
 // ============================================================
 
+// ── Supabase Configuration ─────────────────────────────────────
+const SUPABASE_URL = 'YOUR_SUPABASE_URL'; // Replace with your URL
+const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY'; // Replace with your Anon Key
+const supabase = (typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
+
 // ── Default Data ─────────────────────────────────────────────
 
 const DEFAULT_USERS = [
@@ -14,22 +20,41 @@ const DEFAULT_USERS = [
 
 // ── State helpers ─────────────────────────────────────────────
 
-function getUsers() {
-  const raw = localStorage.getItem('cf_users');
-  return raw ? JSON.parse(raw) : DEFAULT_USERS;
+async function getUsers() {
+  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+    const raw = localStorage.getItem('cf_users');
+    return raw ? JSON.parse(raw) : DEFAULT_USERS;
+  }
+  const { data, error } = await supabase.from('profiles').select('*');
+  return data || DEFAULT_USERS;
 }
 
-function saveUsers(users) {
-  localStorage.setItem('cf_users', JSON.stringify(users));
+async function saveUsers(users) {
+  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+    localStorage.setItem('cf_users', JSON.stringify(users));
+    return;
+  }
+  // For Supabase, we typically update individual profiles, but for this refactor:
+  const { error } = await supabase.from('profiles').upsert(users);
+  if (error) console.error('Supabase saveUsers error:', error);
 }
 
-function getSessions() {
-  const raw = localStorage.getItem('cf_sessions');
-  return raw ? JSON.parse(raw) : [];
+async function getSessions() {
+  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+    const raw = localStorage.getItem('cf_sessions');
+    return raw ? JSON.parse(raw) : [];
+  }
+  const { data, error } = await supabase.from('sessions').select('*');
+  return data || [];
 }
 
-function saveSessions(sessions) {
-  localStorage.setItem('cf_sessions', JSON.stringify(sessions));
+async function saveSessions(sessions) {
+  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+    localStorage.setItem('cf_sessions', JSON.stringify(sessions));
+    return;
+  }
+  const { error } = await supabase.from('sessions').upsert(sessions);
+  if (error) console.error('Supabase saveSessions error:', error);
 }
 
 function getCurrentUser() {
@@ -115,10 +140,10 @@ if (isLoginPage) {
     selectedRole = null;
   };
 
-  window.doLogin = function () {
+  window.doLogin = async function () {
     const username = document.getElementById('loginUser').value.trim().toLowerCase();
     const password = document.getElementById('loginPass').value;
-    const users = getUsers();
+    const users = await getUsers();
     const user = users.find(u => u.username.toLowerCase() === username && u.password === password && u.role === selectedRole);
 
     if (user) {
@@ -200,51 +225,51 @@ if (isDashboard) {
   };
 
   function renderCalendar() {
-    const grid = document.getElementById('calendarGrid');
-    const sessions = getSessions();
+    getSessions().then(sessions => {
+      const grid = document.getElementById('calendarGrid');
+      // Build 7 days
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(currentWeekMonday);
+        d.setDate(d.getDate() + i);
+        days.push(d);
+      }
 
-    // Build 7 days
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(currentWeekMonday);
-      d.setDate(d.getDate() + i);
-      days.push(d);
-    }
+      const startStr = dateToStr(days[0]);
+      const endStr = dateToStr(days[6]);
+      document.getElementById('weekLabel').textContent =
+        `${formatDate(startStr)} — ${formatDate(endStr)}`;
 
-    const startStr = dateToStr(days[0]);
-    const endStr = dateToStr(days[6]);
-    document.getElementById('weekLabel').textContent =
-      `${formatDate(startStr)} — ${formatDate(endStr)}`;
+      // Filter sessions for this week
+      const weekSessions = sessions.filter(s => s.date >= startStr && s.date <= endStr);
 
-    // Filter sessions for this week
-    const weekSessions = sessions.filter(s => s.date >= startStr && s.date <= endStr);
+      const today = dateToStr(new Date());
 
-    const today = dateToStr(new Date());
+      grid.innerHTML = days.map(d => {
+        const ds = dateToStr(d);
+        const daySessions = weekSessions
+          .filter(s => s.date === ds)
+          .sort((a, b) => a.time.localeCompare(b.time));
 
-    grid.innerHTML = days.map(d => {
-      const ds = dateToStr(d);
-      const daySessions = weekSessions
-        .filter(s => s.date === ds)
-        .sort((a, b) => a.time.localeCompare(b.time));
+        const isToday = ds === today;
+        const isPast = ds < today;
 
-      const isToday = ds === today;
-      const isPast = ds < today;
-
-      return `
-        <div class="cal-day ${isToday ? 'today' : ''} ${isPast ? 'past' : ''}">
-          <div class="cal-day-header">
-            <span class="cal-weekday">${d.toLocaleDateString('en-ZA', { weekday: 'short' })}</span>
-            <span class="cal-date ${isToday ? 'today-dot' : ''}">${d.getDate()}</span>
+        return `
+          <div class="cal-day ${isToday ? 'today' : ''} ${isPast ? 'past' : ''}">
+            <div class="cal-day-header">
+              <span class="cal-weekday">${d.toLocaleDateString('en-ZA', { weekday: 'short' })}</span>
+              <span class="cal-date ${isToday ? 'today-dot' : ''}">${d.getDate()}</span>
+            </div>
+            <div class="cal-sessions">
+              ${daySessions.length === 0
+                ? `<div class="cal-empty">No classes</div>`
+                : daySessions.map(s => renderSessionCard(s)).join('')
+              }
+            </div>
           </div>
-          <div class="cal-sessions">
-            ${daySessions.length === 0
-              ? `<div class="cal-empty">No classes</div>`
-              : daySessions.map(s => renderSessionCard(s)).join('')
-            }
-          </div>
-        </div>
-      `;
-    }).join('');
+        `;
+      }).join('');
+    });
   }
 
   function renderSessionCard(s) {
@@ -271,7 +296,7 @@ if (isDashboard) {
 
   // ── Booking Modal ─────────────────────────────────────────
 
-  window.openBookingModal = function () {
+  window.openBookingModal = async function () {
     if (user.role === 'teacher') return;
     pendingStudents = [];
     renderStudentList();
@@ -291,7 +316,8 @@ if (isDashboard) {
 
     // Populate teachers
     const teacherSel = document.getElementById('sessionTeacher');
-    const teachers = getUsers().filter(u => u.role === 'teacher');
+    const allUsers = await getUsers();
+    const teachers = allUsers.filter(u => u.role === 'teacher');
     teacherSel.innerHTML = '<option value="">— Select teacher —</option>' +
       teachers.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
 
@@ -347,7 +373,7 @@ if (isDashboard) {
     renderStudentList();
   };
 
-  window.saveBooking = function () {
+  window.saveBooking = async function () {
     const date = document.getElementById('sessionDate').value;
     const time = document.getElementById('sessionTime').value;
     const duration = parseInt(document.getElementById('sessionDuration').value);
@@ -363,8 +389,9 @@ if (isDashboard) {
       return;
     }
 
+    const allUsers = await getUsers();
     const teacherName = teacherId
-      ? getUsers().find(u => u.id === teacherId)?.name || ''
+      ? allUsers.find(u => u.id === teacherId)?.name || ''
       : '';
 
     const session = {
@@ -381,9 +408,9 @@ if (isDashboard) {
       createdAt: new Date().toISOString()
     };
 
-    const sessions = getSessions();
+    const sessions = await getSessions();
     sessions.push(session);
-    saveSessions(sessions);
+    await saveSessions(sessions);
 
     closeBookingModal();
     renderCalendar();
@@ -391,8 +418,8 @@ if (isDashboard) {
 
   // ── Detail Modal ──────────────────────────────────────────
 
-  window.openDetailModal = function (id) {
-    const sessions = getSessions();
+  window.openDetailModal = async function (id) {
+    const sessions = await getSessions();
     const s = sessions.find(x => x.id === id);
     if (!s) return;
     currentDetailId = id;
@@ -400,6 +427,7 @@ if (isDashboard) {
     document.getElementById('detailTitle').textContent = s.name;
     const endTime = addMinutes(s.time, s.duration);
     const enrolled = s.students ? s.students.length : 0;
+
 
     const canDelete = user.role === 'admin' || user.role === 'frontdesk';
 
@@ -440,10 +468,122 @@ if (isDashboard) {
       </div>
     `;
 
-    const deleteBtn = document.querySelector('.btn-danger');
-    if (deleteBtn) deleteBtn.style.display = canDelete ? 'inline-flex' : 'none';
+    const canDelete = user.role === 'admin' || user.role === 'frontdesk';
+
+    // Reset footer buttons
+    document.getElementById('detailCloseBtn').style.display = 'inline-flex';
+    document.getElementById('editSessionBtn').style.display = canDelete ? 'inline-flex' : 'none';
+    document.getElementById('deleteSessionBtn').style.display = canDelete ? 'inline-flex' : 'none';
+    document.getElementById('editCancelBtn').style.display = 'none';
+    document.getElementById('saveEditBtn').style.display = 'none';
 
     document.getElementById('detailModal').classList.remove('hidden');
+  };
+
+  window.cancelEdit = function () {
+    if (currentDetailId) openDetailModal(currentDetailId);
+  };
+
+  window.editCurrentSession = async function () {
+    const sessions = await getSessions();
+    const s = sessions.find(x => x.id === currentDetailId);
+    if (!s) return;
+
+    const allUsers = await getUsers();
+    const teachers = allUsers.filter(u => u.role === 'teacher');
+    const teacherOptions = teachers.map(t => 
+      `<option value="${t.id}" ${t.id === s.teacherId ? 'selected' : ''}>${t.name}</option>`
+    ).join('');
+
+    document.getElementById('detailBody').innerHTML = `
+      <div class="edit-form">
+        <div class="form-group">
+          <label>Session Name</label>
+          <input type="text" id="editName" value="${s.name}" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="editDate" value="${s.date}" />
+          </div>
+          <div class="form-group">
+            <label>Time</label>
+            <input type="time" id="editTime" value="${s.time}" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Duration</label>
+          <select id="editDuration">
+            <option value="60" ${s.duration === 60 ? 'selected' : ''}>1 Hour</option>
+            <option value="120" ${s.duration === 120 ? 'selected' : ''}>2 Hours</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Max Students</label>
+          <input type="number" id="editMax" value="${s.maxStudents}" min="1" max="50" />
+        </div>
+        <div class="form-group">
+          <label>Teacher</label>
+          <select id="editTeacher">
+            <option value="">— Select teacher —</option>
+            ${teacherOptions}
+          </select>
+        </div>
+        <div id="editError" class="error-msg hidden"></div>
+      </div>
+    `;
+
+    // Swap footer buttons
+    document.getElementById('detailCloseBtn').style.display = 'none';
+    document.getElementById('editSessionBtn').style.display = 'none';
+    document.getElementById('deleteSessionBtn').style.display = 'none';
+    document.getElementById('editCancelBtn').style.display = 'inline-flex';
+    document.getElementById('saveEditBtn').style.display = 'inline-flex';
+  };
+
+  window.saveSessionEdit = async function () {
+    const name = document.getElementById('editName').value.trim();
+    const date = document.getElementById('editDate').value;
+    const time = document.getElementById('editTime').value;
+    const duration = parseInt(document.getElementById('editDuration').value);
+    const maxStudents = parseInt(document.getElementById('editMax').value);
+    const teacherId = document.getElementById('editTeacher').value;
+
+    const errEl = document.getElementById('editError');
+
+    if (!name || !date || !time) {
+      errEl.textContent = 'Please fill in all fields.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    const sessions = await getSessions();
+    const idx = sessions.findIndex(s => s.id === currentDetailId);
+    if (idx === -1) return;
+
+    const allUsers = await getUsers();
+    const teacherName = teacherId
+      ? allUsers.find(u => u.id === teacherId)?.name || ''
+      : '';
+
+    // Update session
+    sessions[idx] = {
+      ...sessions[idx],
+      name,
+      date,
+      time,
+      duration,
+      maxStudents,
+      teacherId,
+      teacherName
+    };
+
+    saveSessions(sessions);
+    
+    // Reset modal state and refresh
+    openDetailModal(currentDetailId);
+    renderCalendar();
+    renderBookingsList();
   };
 
   window.closeDetailModal = function () {
@@ -451,11 +591,12 @@ if (isDashboard) {
     currentDetailId = null;
   };
 
-  window.deleteCurrentSession = function () {
+  window.deleteCurrentSession = async function () {
     if (!currentDetailId) return;
     if (!confirm('Are you sure you want to delete this session?')) return;
-    const sessions = getSessions().filter(s => s.id !== currentDetailId);
-    saveSessions(sessions);
+    const allSessions = await getSessions();
+    const sessions = allSessions.filter(s => s.id !== currentDetailId);
+    await saveSessions(sessions);
     closeDetailModal();
     renderCalendar();
     renderBookingsList();
@@ -463,8 +604,9 @@ if (isDashboard) {
 
   // ── Bookings List ─────────────────────────────────────────
 
-  function renderBookingsList() {
-    const sessions = getSessions().sort((a, b) => {
+  async function renderBookingsList() {
+    const allSessions = await getSessions();
+    const sessions = allSessions.sort((a, b) => {
       const da = a.date + a.time;
       const db = b.date + b.time;
       return da.localeCompare(db);
@@ -475,6 +617,7 @@ if (isDashboard) {
       container.innerHTML = '<div class="empty-state">No sessions booked yet.</div>';
       return;
     }
+
 
     container.innerHTML = sessions.map(s => {
       const enrolled = s.students ? s.students.length : 0;
@@ -495,13 +638,15 @@ if (isDashboard) {
 
   // ── Admin Panel ───────────────────────────────────────────
 
-  function renderAdminPanel() {
-    const users = getUsers().filter(u => u.role !== 'admin');
+  async function renderAdminPanel() {
+    const allUsers = await getUsers();
+    const users = allUsers.filter(u => u.role !== 'admin');
     const container = document.getElementById('userList');
     if (!users.length) {
       container.innerHTML = '<div class="sub">No users yet.</div>';
       return;
     }
+
     container.innerHTML = users.map(u => `
       <div class="user-row">
         <div class="user-avatar">${u.name.charAt(0)}</div>
@@ -514,7 +659,7 @@ if (isDashboard) {
     `).join('');
   }
 
-  window.createUser = function () {
+  window.createUser = async function () {
     const name = document.getElementById('newUserName').value.trim();
     const username = document.getElementById('newUsername').value.trim().toLowerCase();
     const password = document.getElementById('newUserPass').value;
@@ -528,7 +673,7 @@ if (isDashboard) {
       return;
     }
 
-    const users = getUsers();
+    const users = await getUsers();
     if (users.find(u => u.username.toLowerCase() === username)) {
       msgEl.textContent = 'Username already taken.';
       msgEl.className = 'error-msg';
@@ -537,7 +682,7 @@ if (isDashboard) {
     }
 
     users.push({ id: uid(), name, username, password, role });
-    saveUsers(users);
+    await saveUsers(users);
 
     msgEl.textContent = `✓ Account created for ${name}`;
     msgEl.className = 'success-msg';
@@ -551,10 +696,11 @@ if (isDashboard) {
     setTimeout(() => msgEl.classList.add('hidden'), 3000);
   };
 
-  window.deleteUser = function (id) {
+  window.deleteUser = async function (id) {
     if (!confirm('Delete this user?')) return;
-    const users = getUsers().filter(u => u.id !== id);
-    saveUsers(users);
+    const allUsers = await getUsers();
+    const users = allUsers.filter(u => u.id !== id);
+    await saveUsers(users);
     renderAdminPanel();
   };
 
