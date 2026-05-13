@@ -496,8 +496,6 @@ if (isDashboard) {
       </div>
     `;
 
-    const canDelete = user.role === 'admin' || user.role === 'frontdesk';
-
     // Reset footer buttons
     document.getElementById('detailCloseBtn').style.display = 'inline-flex';
     document.getElementById('editSessionBtn').style.display = canDelete ? 'inline-flex' : 'none';
