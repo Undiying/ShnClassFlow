@@ -6,7 +6,8 @@
 // ── Supabase Configuration ─────────────────────────────────────
 const SUPABASE_URL = 'https://rnvpgurtthezmzffdlhi.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJudnBndXJ0dGhlem16ZmZkbGhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NTM4NDMsImV4cCI6MjA5NDIyOTg0M30.WUl_SVepT7uQmR0ObDmkQYNN33Gik2_OnW4RE3b6a74';
-const supabase = (typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
 
 
 
@@ -22,39 +23,39 @@ const DEFAULT_USERS = [
 // ── State helpers ─────────────────────────────────────────────
 
 async function getUsers() {
-  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+  if (!sb || SUPABASE_URL.includes('YOUR')) {
     const raw = localStorage.getItem('cf_users');
     return raw ? JSON.parse(raw) : DEFAULT_USERS;
   }
-  const { data, error } = await supabase.from('profiles').select('*');
+  const { data, error } = await sb.from('profiles').select('*');
   return data || DEFAULT_USERS;
 }
 
 async function saveUsers(users) {
-  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+  if (!sb || SUPABASE_URL.includes('YOUR')) {
     localStorage.setItem('cf_users', JSON.stringify(users));
     return;
   }
   // For Supabase, we typically update individual profiles, but for this refactor:
-  const { error } = await supabase.from('profiles').upsert(users);
+  const { error } = await sb.from('profiles').upsert(users);
   if (error) console.error('Supabase saveUsers error:', error);
 }
 
 async function getSessions() {
-  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+  if (!sb || SUPABASE_URL.includes('YOUR')) {
     const raw = localStorage.getItem('cf_sessions');
     return raw ? JSON.parse(raw) : [];
   }
-  const { data, error } = await supabase.from('sessions').select('*');
+  const { data, error } = await sb.from('sessions').select('*');
   return data || [];
 }
 
 async function saveSessions(sessions) {
-  if (!supabase || SUPABASE_URL.includes('YOUR')) {
+  if (!sb || SUPABASE_URL.includes('YOUR')) {
     localStorage.setItem('cf_sessions', JSON.stringify(sessions));
     return;
   }
-  const { error } = await supabase.from('sessions').upsert(sessions);
+  const { error } = await sb.from('sessions').upsert(sessions);
   if (error) console.error('Supabase saveSessions error:', error);
 }
 
