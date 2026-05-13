@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClassFlow — Login</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body class="login-page">
+
+  <div class="login-bg">
+    <div class="login-blob b1"></div>
+    <div class="login-blob b2"></div>
+    <div class="login-blob b3"></div>
+  </div>
+
+  <div class="login-container">
+    <div class="login-header">
+      <div class="login-logo">CF</div>
+      <h1>ClassFlow</h1>
+      <p>Class Management System</p>
+    </div>
+
+    <!-- Role Selection -->
+    <div id="roleSelect" class="login-card">
+      <h2>Who are you?</h2>
+      <p class="sub">Select your role to continue</p>
+      <div class="role-grid">
+        <button class="role-btn" onclick="selectRole('frontdesk')">
+          <span class="role-icon">🗓️</span>
+          <span class="role-label">Front Desk</span>
+          <span class="role-desc">Bookings &amp; calendar</span>
+        </button>
+        <button class="role-btn" onclick="selectRole('teacher')">
+          <span class="role-icon">📚</span>
+          <span class="role-label">Teacher</span>
+          <span class="role-desc">View your sessions</span>
+        </button>
+        <button class="role-btn" onclick="selectRole('admin')">
+          <span class="role-icon">⚙️</span>
+          <span class="role-label">Admin</span>
+          <span class="role-desc">Full system control</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Login Form -->
+    <div id="loginForm" class="login-card hidden">
+      <button class="back-btn" onclick="goBack()">← Back</button>
+      <div id="loginRoleLabel" class="role-badge"></div>
+      <h2>Welcome back</h2>
+      <p class="sub">Enter your credentials</p>
+
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="loginUser" placeholder="Enter username" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="loginPass" placeholder="Enter password" autocomplete="current-password" />
+      </div>
+      <div id="loginError" class="error-msg hidden">Incorrect username or password.</div>
+      <button class="btn-primary full" onclick="doLogin()">Sign In</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

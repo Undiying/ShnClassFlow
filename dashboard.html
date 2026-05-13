@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClassFlow — Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body class="dashboard-page">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="login-logo small">CF</div>
+      <span>ClassFlow</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" data-view="calendar">
+        <span class="nav-icon">🗓️</span> Calendar
+      </a>
+      <a href="#" class="nav-item" data-view="bookings" id="navBookings">
+        <span class="nav-icon">📋</span> All Bookings
+      </a>
+      <a href="#" class="nav-item" id="navAdmin" style="display:none" data-view="admin">
+        <span class="nav-icon">⚙️</span> Admin
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user">
+        <div class="avatar" id="sidebarAvatar">?</div>
+        <div>
+          <div class="sidebar-username" id="sidebarName">—</div>
+          <div class="sidebar-role" id="sidebarRole">—</div>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="logout()">Sign out</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- CALENDAR VIEW -->
+    <section id="viewCalendar" class="view active">
+      <div class="view-header">
+        <div>
+          <h1 id="weekLabel">Week</h1>
+          <p class="view-sub">Weekly class schedule</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn-ghost" onclick="shiftWeek(-1)">← Prev</button>
+          <button class="btn-ghost" onclick="shiftWeek(0)">Today</button>
+          <button class="btn-ghost" onclick="shiftWeek(1)">Next →</button>
+          <button class="btn-primary" onclick="openBookingModal()" id="bookBtn">+ Book Session</button>
+        </div>
+      </div>
+
+      <div class="calendar-grid" id="calendarGrid">
+        <!-- Rendered by JS -->
+      </div>
+    </section>
+
+    <!-- ALL BOOKINGS VIEW -->
+    <section id="viewBookings" class="view">
+      <div class="view-header">
+        <div>
+          <h1>All Bookings</h1>
+          <p class="view-sub">Every scheduled session</p>
+        </div>
+        <button class="btn-primary" onclick="openBookingModal()" id="bookBtn2">+ Book Session</button>
+      </div>
+      <div id="bookingsList" class="bookings-list"></div>
+    </section>
+
+    <!-- ADMIN VIEW -->
+    <section id="viewAdmin" class="view">
+      <div class="view-header">
+        <div>
+          <h1>Admin Panel</h1>
+          <p class="view-sub">Manage users and system settings</p>
+        </div>
+      </div>
+
+      <div class="admin-grid">
+        <!-- User Management -->
+        <div class="admin-card">
+          <h3>User Accounts</h3>
+          <p class="sub">Create accounts for teachers and front desk staff</p>
+          <div class="form-group">
+            <label>Full Name</label>
+            <input type="text" id="newUserName" placeholder="e.g. Sarah Jones" />
+          </div>
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="newUsername" placeholder="e.g. sarahj" />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="newUserPass" placeholder="Set a password" />
+          </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select id="newUserRole">
+              <option value="teacher">Teacher</option>
+              <option value="frontdesk">Front Desk</option>
+            </select>
+          </div>
+          <button class="btn-primary" onclick="createUser()">Create Account</button>
+          <div id="adminMsg" class="success-msg hidden"></div>
+        </div>
+
+        <!-- User List -->
+        <div class="admin-card">
+          <h3>Current Users</h3>
+          <div id="userList" class="user-list"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- BOOKING MODAL -->
+  <div id="bookingModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Book a Free Session</h2>
+        <button class="modal-close" onclick="closeBookingModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="sessionDate" />
+          </div>
+          <div class="form-group">
+            <label>Start Time</label>
+            <input type="time" id="sessionTime" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Duration</label>
+          <div class="toggle-group">
+            <button class="toggle-btn active" data-val="60" onclick="selectDuration(this)">1 Hour</button>
+            <button class="toggle-btn" data-val="120" onclick="selectDuration(this)">2 Hours</button>
+          </div>
+          <input type="hidden" id="sessionDuration" value="60" />
+        </div>
+
+        <div class="form-group">
+          <label>Session Name / Subject</label>
+          <input type="text" id="sessionName" placeholder="e.g. Beginner Swimming" />
+        </div>
+
+        <div class="form-group">
+          <label>Max Students</label>
+          <input type="number" id="sessionMax" min="1" max="50" value="10" />
+        </div>
+
+        <div class="form-group">
+          <label>Assign Teacher</label>
+          <select id="sessionTeacher">
+            <option value="">— Select teacher —</option>
+          </select>
+        </div>
+
+        <!-- Students Section -->
+        <div class="form-group">
+          <label>Students</label>
+          <div id="studentList" class="student-list"></div>
+          <div class="add-student-row">
+            <input type="text" id="studentName" placeholder="Student name" />
+            <input type="number" id="studentAge" placeholder="Age" min="1" max="100" style="width:80px" />
+            <button class="btn-ghost small" onclick="addStudent()">+ Add</button>
+          </div>
+          <div id="studentError" class="error-msg hidden">Please enter a student name.</div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closeBookingModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveBooking()">Save Session</button>
+      </div>
+      <div id="bookingError" class="error-msg hidden" style="padding: 0 1.5rem 1rem"></div>
+    </div>
+  </div>
+
+  <!-- SESSION DETAIL MODAL -->
+  <div id="detailModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="detailTitle">Session Details</h2>
+        <button class="modal-close" onclick="closeDetailModal()">✕</button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closeDetailModal()">Close</button>
+        <button class="btn-danger" onclick="deleteCurrentSession()">Delete Session</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
