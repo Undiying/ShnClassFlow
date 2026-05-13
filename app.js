@@ -457,7 +457,7 @@ if (isDashboard) {
     const enrolled = s.students ? s.students.length : 0;
 
 
-    const canDelete = user.role === 'admin' || user.role === 'frontdesk';
+    const canManage = user.role === 'admin' || user.role === 'frontdesk' || user.role === 'teacher';
 
     document.getElementById('detailBody').innerHTML = `
       <div class="detail-grid">
@@ -498,8 +498,8 @@ if (isDashboard) {
 
     // Reset footer buttons
     document.getElementById('detailCloseBtn').style.display = 'inline-flex';
-    document.getElementById('editSessionBtn').style.display = canDelete ? 'inline-flex' : 'none';
-    document.getElementById('deleteSessionBtn').style.display = canDelete ? 'inline-flex' : 'none';
+    document.getElementById('editSessionBtn').style.display = canManage ? 'inline-flex' : 'none';
+    document.getElementById('deleteSessionBtn').style.display = canManage ? 'inline-flex' : 'none';
     document.getElementById('editCancelBtn').style.display = 'none';
     document.getElementById('saveEditBtn').style.display = 'none';
 
@@ -514,6 +514,9 @@ if (isDashboard) {
     const sessions = await getSessions();
     const s = sessions.find(x => x.id === currentDetailId);
     if (!s) return;
+
+    // Initialize pendingStudents with current session students
+    pendingStudents = [...(s.students || [])];
 
     const allUsers = await getUsers();
     const teachers = allUsers.filter(u => u.role === 'teacher');
@@ -555,9 +558,24 @@ if (isDashboard) {
             ${teacherOptions}
           </select>
         </div>
+        
+        <!-- Students Section in Edit -->
+        <div class="form-group">
+          <label>Students</label>
+          <div id="editStudentList" class="student-list"></div>
+          <div class="add-student-row">
+            <input type="text" id="editStudentName" placeholder="Student name" />
+            <input type="number" id="editStudentAge" placeholder="Age" min="1" max="100" style="width:80px" />
+            <button class="btn-ghost small" onclick="addStudentEdit()">+ Add</button>
+          </div>
+        </div>
+
         <div id="editError" class="error-msg hidden"></div>
       </div>
     `;
+
+    renderStudentListEdit();
+
 
     // Swap footer buttons
     document.getElementById('detailCloseBtn').style.display = 'none';
@@ -601,7 +619,8 @@ if (isDashboard) {
       duration,
       maxStudents,
       teacherId,
-      teacherName
+      teacherName,
+      students: [...pendingStudents]
     };
 
     saveSessions(sessions);
@@ -611,6 +630,43 @@ if (isDashboard) {
     renderCalendar();
     renderBookingsList();
   };
+
+  // ── Student Edit Helpers ────────────────────────────────────
+
+  window.addStudentEdit = function () {
+    const nameEl = document.getElementById('editStudentName');
+    const ageEl = document.getElementById('editStudentAge');
+    const name = nameEl.value.trim();
+    const age = ageEl.value.trim();
+
+    if (!name) return;
+    pendingStudents.push({ name, age: age || '—' });
+    nameEl.value = '';
+    ageEl.value = '';
+    renderStudentListEdit();
+    nameEl.focus();
+  };
+
+  window.removeStudentEdit = function (idx) {
+    pendingStudents.splice(idx, 1);
+    renderStudentListEdit();
+  };
+
+  function renderStudentListEdit() {
+    const container = document.getElementById('editStudentList');
+    if (!container) return;
+    if (!pendingStudents.length) {
+      container.innerHTML = '<div class="no-students">No students added yet</div>';
+      return;
+    }
+    container.innerHTML = pendingStudents.map((s, i) => `
+      <div class="student-item">
+        <span class="student-name">${s.name}</span>
+        <span class="student-age">Age: ${s.age}</span>
+        <button class="remove-btn" onclick="removeStudentEdit(${i})">✕</button>
+      </div>
+    `).join('');
+  }
 
   window.closeDetailModal = function () {
     document.getElementById('detailModal').classList.add('hidden');
