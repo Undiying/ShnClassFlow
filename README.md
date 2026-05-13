@@ -44,6 +44,49 @@ Push this folder to GitHub, then connect your repo to [Netlify](https://netlify.
 └── README.md
 ```
 
+## Supabase Setup
+
+To use the live backend, you must create the following tables in your Supabase SQL Editor:
+
+```sql
+-- 1. Profiles Table
+CREATE TABLE profiles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  username TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  role TEXT NOT NULL
+);
+
+-- 2. Sessions Table
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  date DATE NOT NULL,
+  time TIME NOT NULL,
+  duration INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  "maxStudents" INTEGER DEFAULT 10,
+  "teacherId" TEXT REFERENCES profiles(id),
+  "teacherName" TEXT,
+  students JSONB DEFAULT '[]',
+  "createdBy" TEXT,
+  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+### Initial Data
+Once the tables are created, you can insert the default admin user:
+```sql
+INSERT INTO profiles (id, name, username, password, role)
+VALUES ('u0', 'Admin', 'admin', 'sheen', 'admin');
+```
+
+## Deployment
+
+1. Push this folder to GitHub.
+2. Connect your repo to [Netlify](https://netlify.com).
+3. Your app will automatically use Supabase for data storage.
+
 ## Data Storage
 
 All data (sessions, users) is stored in the browser's `localStorage`. No backend required.

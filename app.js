@@ -4,9 +4,10 @@
 // ============================================================
 
 // ── Supabase Configuration ─────────────────────────────────────
-const SUPABASE_URL = 'YOUR_SUPABASE_URL'; // Replace with your URL
-const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY'; // Replace with your Anon Key
+const SUPABASE_URL = 'https://rnvpgurtthezmzffdlhi.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJudnBndXJ0dGhlem16ZmZkbGhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NTM4NDMsImV4cCI6MjA5NDIyOTg0M30.WUl_SVepT7uQmR0ObDmkQYNN33Gik2_OnW4RE3b6a74';
 const supabase = (typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
 
 
 // ── Default Data ─────────────────────────────────────────────
