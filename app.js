@@ -8,6 +8,12 @@ const SUPABASE_URL = 'https://rnvpgurtthezmzffdlhi.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJudnBndXJ0dGhlem16ZmZkbGhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NTM4NDMsImV4cCI6MjA5NDIyOTg0M30.WUl_SVepT7uQmR0ObDmkQYNN33Gik2_OnW4RE3b6a74';
 const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
+if (!sb) {
+  console.warn('Supabase client not initialized. Falling back to localStorage.');
+} else {
+  console.log('Supabase client initialized successfully.');
+}
+
 
 
 
@@ -143,16 +149,33 @@ if (isLoginPage) {
   };
 
   window.doLogin = async function () {
-    const username = document.getElementById('loginUser').value.trim().toLowerCase();
-    const password = document.getElementById('loginPass').value;
-    const users = await getUsers();
-    const user = users.find(u => u.username.toLowerCase() === username && u.password === password && u.role === selectedRole);
+    console.log('Login attempt started...');
+    try {
+      const username = document.getElementById('loginUser').value.trim().toLowerCase();
+      const password = document.getElementById('loginPass').value;
+      
+      if (!selectedRole) {
+        console.error('No role selected');
+        return;
+      }
 
-    if (user) {
-      setCurrentUser(user);
-      window.location.href = 'dashboard.html';
-    } else {
-      document.getElementById('loginError').classList.remove('hidden');
+      console.log(`Fetching users for role: ${selectedRole}...`);
+      const users = await getUsers();
+      console.log('Users fetched:', users.length);
+
+      const user = users.find(u => u.username.toLowerCase() === username && u.password === password && u.role === selectedRole);
+
+      if (user) {
+        console.log('Login successful for:', user.name);
+        setCurrentUser(user);
+        window.location.href = 'dashboard.html';
+      } else {
+        console.warn('Login failed: Invalid credentials');
+        document.getElementById('loginError').classList.remove('hidden');
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      alert('An error occurred during login. Please check the console.');
     }
   };
 
@@ -181,13 +204,15 @@ if (isDashboard) {
     document.getElementById('navAdmin').style.display = 'flex';
   }
 
-  // Teachers can't book
+  // Teachers CAN book sessions now
+  /*
   if (user.role === 'teacher') {
     const b1 = document.getElementById('bookBtn');
     const b2 = document.getElementById('bookBtn2');
     if (b1) b1.style.display = 'none';
     if (b2) b2.style.display = 'none';
   }
+  */
 
   // ── Week state ───────────────────────────────────────────
 
@@ -299,7 +324,8 @@ if (isDashboard) {
   // ── Booking Modal ─────────────────────────────────────────
 
   window.openBookingModal = async function () {
-    if (user.role === 'teacher') return;
+    // Teachers are allowed to book now
+    // if (user.role === 'teacher') return;
     pendingStudents = [];
     renderStudentList();
     document.getElementById('bookingError').classList.add('hidden');
@@ -321,7 +347,7 @@ if (isDashboard) {
     const allUsers = await getUsers();
     const teachers = allUsers.filter(u => u.role === 'teacher');
     teacherSel.innerHTML = '<option value="">— Select teacher —</option>' +
-      teachers.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+      teachers.map(t => `<option value="${t.id}" ${t.id === user.id ? 'selected' : ''}>${t.name}</option>`).join('');
 
     document.getElementById('bookingModal').classList.remove('hidden');
   };
