@@ -63,7 +63,7 @@ async function saveSessions(sessions) {
   }
   const cleanSessions = sessions.map(s => {
     const { type, ...rest } = s;
-    if (rest.date === '') rest.date = null;
+    if (!rest.date || rest.date === '') rest.date = '2000-01-01'; // Satisfy NOT NULL constraint
     return rest;
   });
   const { error } = await sb.from('sessions').upsert(cleanSessions);
