@@ -61,10 +61,35 @@ async function saveSessions(sessions) {
     localStorage.setItem('cf_sessions', JSON.stringify(sessions));
     return;
   }
-  // We use upsert to save the entire state or individual updates
   const { error } = await sb.from('sessions').upsert(sessions);
   if (error) console.error('Supabase saveSessions error:', error);
 }
+
+async function getStudents() {
+  if (!sb || SUPABASE_URL.includes('YOUR')) {
+    const raw = localStorage.getItem('cf_students');
+    return raw ? JSON.parse(raw) : [];
+  }
+  // Fallback to localStorage if the students table doesn't exist yet
+  const { data, error } = await sb.from('students').select('*').catch(() => ({error: true}));
+  if (error) {
+    const raw = localStorage.getItem('cf_students');
+    return raw ? JSON.parse(raw) : [];
+  }
+  return data || [];
+}
+
+async function saveStudents(students) {
+  if (!sb || SUPABASE_URL.includes('YOUR')) {
+    localStorage.setItem('cf_students', JSON.stringify(students));
+    return;
+  }
+  const { error } = await sb.from('students').upsert(students).catch(() => ({error: true}));
+  if (error) {
+    localStorage.setItem('cf_students', JSON.stringify(students));
+  }
+}
+
 
 
 function getCurrentUser() {
@@ -203,16 +228,16 @@ if (isDashboard) {
 
   // Role-specific UI
   if (user.role === 'teacher') {
-    document.getElementById('bookBtn').textContent = '+ Create Class';
-    document.getElementById('bookBtn2').textContent = '+ Create Class';
-    document.getElementById('viewSub').textContent = 'Manage your weekly recurring classes';
-    // Remove "All Bookings" for teachers if preferred, or rename
-    document.getElementById('navBookings').innerHTML = '<span class="nav-icon">📚</span> My Classes';
+    document.getElementById('bookBtn').textContent = '+ Create Time Slot';
+    document.getElementById('bookBtn2').textContent = '+ Create Time Slot';
+    document.getElementById('viewSub').textContent = 'Manage your weekly recurring time slots';
+    document.getElementById('navBookings').innerHTML = '<span class="nav-icon">📚</span> My Time Slots';
   } else {
     document.getElementById('bookBtn').textContent = '+ Book Session';
     document.getElementById('bookBtn2').textContent = '+ Book Session';
     document.getElementById('viewSub').textContent = 'Weekly class schedule';
   }
+
 
 
   // ── Week state ───────────────────────────────────────────
@@ -233,8 +258,99 @@ if (isDashboard) {
       document.getElementById('view' + view.charAt(0).toUpperCase() + view.slice(1)).classList.add('active');
       if (view === 'bookings') renderBookingsList();
       if (view === 'admin') renderAdminPanel();
+      if (view === 'bookings') renderBookingsList();
+      if (view === 'admin') renderAdminPanel();
+      if (view === 'students') renderGlobalStudentsList();
     });
   });
+
+  async function renderGlobalStudentsList() {
+    const students = await getStudents();
+    const container = document.getElementById('globalStudentList');
+    if (!container) return;
+    
+    if (students.length === 0) {
+      container.innerHTML = '<p class="sub">No students registered yet.</p>';
+      return;
+    }
+    
+    container.innerHTML = students.map(s => `
+      <div class="user-row">
+        <div class="user-avatar">${s.name.charAt(0).toUpperCase()}</div>
+        <div style="flex:2">
+          <div class="user-name">${s.name}</div>
+          <div class="user-meta">Age: ${s.age || 'N/A'}</div>
+        </div>
+        <div style="flex:3;">
+          <div class="user-name">${s.parentName || 'No Parent'}</div>
+          <div class="user-meta">${s.parentPhone || 'No phone'} · ${s.parentEmail || 'No email'}</div>
+        </div>
+        <div style="flex:3; color: var(--text-2); font-size: 0.8rem;">
+          ${s.notes || 'No notes'}
+        </div>
+      </div>
+    `).join('');
+
+  }
+
+  // ── Student Modal ─────────────────────────────────────────
+
+  window.openStudentModal = function() {
+    document.getElementById('newStudentName').value = '';
+    document.getElementById('newStudentAge').value = '';
+    document.getElementById('newStudentNotes').value = '';
+    document.getElementById('studentModalError').classList.add('hidden');
+    document.getElementById('studentModal').classList.remove('hidden');
+  };
+
+  window.closeStudentModal = function() {
+    document.getElementById('studentModal').classList.add('hidden');
+  };
+
+  window.saveNewStudent = async function() {
+    const name = document.getElementById('newStudentName').value.trim();
+    const age = document.getElementById('newStudentAge').value.trim();
+    const parentName = document.getElementById('newStudentParent')?.value.trim() || '';
+    const parentPhone = document.getElementById('newStudentPhone')?.value.trim() || '';
+    const parentEmail = document.getElementById('newStudentEmail')?.value.trim() || '';
+    const notes = document.getElementById('newStudentNotes').value.trim();
+
+    if (!name || !parentName) {
+      const err = document.getElementById('studentModalError');
+      err.textContent = "Please provide both Student Name and Parent Name.";
+      err.classList.remove('hidden');
+      return;
+    }
+
+    const newStudent = {
+      id: 'st' + Math.random().toString(36).substr(2, 9),
+      name,
+      age: age || '',
+      parentName,
+      parentPhone,
+      parentEmail,
+      notes: notes || '',
+      createdAt: new Date().toISOString()
+    };
+
+
+    const students = await getStudents();
+    students.push(newStudent);
+    await saveStudents(students);
+    
+    closeStudentModal();
+    renderGlobalStudentsList();
+    
+    // If the booking modal is open, refresh its dropdown
+    if (!document.getElementById('bookingModal').classList.contains('hidden')) {
+      populateStudentDropdown('bookingStudentSelect');
+    }
+    if (!document.getElementById('detailModal').classList.contains('hidden')) {
+      populateStudentDropdown('editStudentSelect');
+    }
+  };
+
+
 
   window.logout = function () {
     sessionStorage.removeItem('cf_current_user');
@@ -401,11 +517,14 @@ if (isDashboard) {
     const isTeacher = user.role === 'teacher';
     pendingStudents = [];
     renderStudentList();
+    populateStudentDropdown('bookingStudentSelect');
+    
     document.getElementById('bookingError').classList.add('hidden');
     document.getElementById('studentError').classList.add('hidden');
 
     // Setup modal based on role
-    document.getElementById('bookingTitle').textContent = isTeacher ? 'Create Recurring Class' : 'Book Free Session';
+    document.getElementById('bookingTitle').textContent = isTeacher ? 'Schedule Time Slot' : 'Book Free Session';
+
     
     // For teachers, we use Day of Week. For others, specific Date.
     const dateGroup = document.getElementById('dateGroup');
@@ -441,6 +560,7 @@ if (isDashboard) {
     } else {
       document.getElementById('sessionName').value = '';
       document.getElementById('sessionMax').value = '10';
+      document.getElementById('sessionNotes').value = '';
       document.getElementById('sessionMax').disabled = false;
     }
 
@@ -503,24 +623,37 @@ if (isDashboard) {
     document.getElementById('sessionDuration').value = btn.dataset.val;
   };
 
-  window.addStudent = function () {
-    const nameEl = document.getElementById('studentName');
-    const ageEl = document.getElementById('studentAge');
-    const name = nameEl.value.trim();
-    const age = ageEl.value.trim();
+  window.populateStudentDropdown = async function(selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    const students = await getStudents();
+    sel.innerHTML = '<option value="">— Select an existing student —</option>' + 
+      students.map(s => `<option value='${JSON.stringify({id: s.id, name: s.name, age: s.age})}'>${s.name} (Age: ${s.age || '-'})</option>`).join('');
+  };
 
-    if (!name) {
+  window.addStudent = function () {
+    const sel = document.getElementById('bookingStudentSelect');
+    if (!sel || !sel.value) {
+      document.getElementById('studentError').textContent = 'Please select a student from the list.';
       document.getElementById('studentError').classList.remove('hidden');
       return;
     }
     document.getElementById('studentError').classList.add('hidden');
 
-    pendingStudents.push({ name, age: age || '—' });
-    nameEl.value = '';
-    ageEl.value = '';
+    const sData = JSON.parse(sel.value);
+    
+    // Prevent duplicates
+    if (pendingStudents.find(p => p.id === sData.id)) {
+      document.getElementById('studentError').textContent = 'Student is already added to this slot.';
+      document.getElementById('studentError').classList.remove('hidden');
+      return;
+    }
+
+    pendingStudents.push(sData);
+    sel.value = '';
     renderStudentList();
-    nameEl.focus();
   };
+
 
   function renderStudentList() {
     const container = document.getElementById('studentList');
@@ -557,9 +690,11 @@ if (isDashboard) {
     const name = document.getElementById('sessionName').value.trim();
     const maxStudents = parseInt(document.getElementById('sessionMax').value);
     const teacherId = document.getElementById('sessionTeacher').value;
+    const notes = document.getElementById('sessionNotes').value.trim();
 
     let date = '';
     let dayOfWeek = null;
+
 
     if (isTeacher) {
       dayOfWeek = parseInt(document.getElementById('sessionDay').value);
@@ -593,10 +728,12 @@ if (isDashboard) {
       maxStudents: isTeacher ? 9 : maxStudents,
       teacherId,
       teacherName,
+      notes,
       students: [...pendingStudents],
       createdBy: user.id,
       createdAt: new Date().toISOString()
     };
+
 
 
     const sessions = await getSessions();
@@ -642,7 +779,14 @@ if (isDashboard) {
           <span>${enrolled} / ${s.maxStudents} students</span>
         </div>
       </div>
+      ${s.notes ? `
+        <div class="detail-notes">
+          <h4>Admin/Front Desk Notes</h4>
+          <p>${s.notes}</p>
+        </div>
+      ` : ''}
       <div class="detail-students">
+
         <h4>Students (${enrolled})</h4>
         ${enrolled === 0
           ? '<p class="sub">No students registered.</p>'
@@ -736,23 +880,33 @@ if (isDashboard) {
             ${teacherOptions}
           </select>
         </div>
+
+        <div class="form-group">
+          <label>Admin/Front Desk Notes</label>
+          <textarea id="editNotes" rows="2">${s.notes || ''}</textarea>
+        </div>
         
         <!-- Students Section in Edit -->
+
         <div class="form-group">
-          <label>Students</label>
+        <div class="form-group">
+          <label>Assign Registered Student</label>
           <div id="editStudentList" class="student-list"></div>
-          <div class="add-student-row">
-            <input type="text" id="editStudentName" placeholder="Student name" />
-            <input type="number" id="editStudentAge" placeholder="Age" min="1" max="100" style="width:80px" />
+          <div class="add-student-row" style="grid-template-columns: 1fr auto;">
+            <select id="editStudentSelect">
+              <option value="">— Select an existing student —</option>
+            </select>
             <button class="btn-ghost small" onclick="addStudentEdit()">+ Add</button>
           </div>
         </div>
+
 
         <div id="editError" class="error-msg hidden"></div>
       </div>
     `;
 
     renderStudentListEdit();
+    populateStudentDropdown('editStudentSelect');
 
 
     // Swap footer buttons
@@ -770,8 +924,10 @@ if (isDashboard) {
     const duration = parseInt(document.getElementById('editDuration').value);
     const maxStudents = parseInt(document.getElementById('editMax').value);
     const teacherId = document.getElementById('editTeacher').value;
+    const notes = document.getElementById('editNotes').value.trim();
 
     const errEl = document.getElementById('editError');
+
 
     if (!name || !date || !time) {
       errEl.textContent = 'Please fill in all fields.';
@@ -799,8 +955,10 @@ if (isDashboard) {
       maxStudents: isTeacher ? 9 : maxStudents,
       teacherId,
       teacherName,
+      notes,
       students: [...pendingStudents]
     };
+
 
 
     saveSessions(sessions);
@@ -814,18 +972,19 @@ if (isDashboard) {
   // ── Student Edit Helpers ────────────────────────────────────
 
   window.addStudentEdit = function () {
-    const nameEl = document.getElementById('editStudentName');
-    const ageEl = document.getElementById('editStudentAge');
-    const name = nameEl.value.trim();
-    const age = ageEl.value.trim();
+    const sel = document.getElementById('editStudentSelect');
+    if (!sel || !sel.value) return;
 
-    if (!name) return;
-    pendingStudents.push({ name, age: age || '—' });
-    nameEl.value = '';
-    ageEl.value = '';
+    const sData = JSON.parse(sel.value);
+    
+    // Prevent duplicates
+    if (pendingStudents.find(p => p.id === sData.id)) return;
+
+    pendingStudents.push(sData);
+    sel.value = '';
     renderStudentListEdit();
-    nameEl.focus();
   };
+
 
   window.removeStudentEdit = function (idx) {
     pendingStudents.splice(idx, 1);

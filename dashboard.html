@@ -23,6 +23,10 @@
       <a href="#" class="nav-item" data-view="bookings" id="navBookings">
         <span class="nav-icon">📋</span> All Bookings
       </a>
+      <a href="#" class="nav-item" data-view="students" id="navStudents">
+        <span class="nav-icon">👥</span> Students
+      </a>
+
       <a href="#" class="nav-item" id="navAdmin" style="display:none" data-view="admin">
         <span class="nav-icon">⚙️</span> Admin
       </a>
@@ -132,13 +136,34 @@
       </div>
     </section>
 
+    <!-- STUDENTS VIEW -->
+    <section id="viewStudents" class="view">
+      <div class="view-header">
+        <div>
+          <h1>Student Directory</h1>
+          <p class="view-sub">Manage all registered students globally</p>
+        </div>
+        <button class="btn-primary" onclick="openStudentModal()" id="registerStudentBtn">+ Register Student</button>
+      </div>
+      <div class="admin-grid">
+        <div class="admin-card" style="grid-column: 1 / -1">
+          <h3>All Students</h3>
+          <div id="globalStudentList" class="user-list"></div>
+        </div>
+      </div>
+    </section>
+          <p class="sub">Students are managed directly within their class time slots on the calendar.</p>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- BOOKING MODAL -->
   <div id="bookingModal" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <h2>Book a Free Session</h2>
+        <h2 id="bookingTitle">Book a Free Session</h2>
         <button class="modal-close" onclick="closeBookingModal()">✕</button>
       </div>
 
@@ -179,17 +204,25 @@
           </select>
         </div>
 
+        <div class="form-group">
+          <label>Admin/Front Desk Notes (for Teacher)</label>
+          <textarea id="sessionNotes" placeholder="e.g. John will be 10 mins late" rows="2"></textarea>
+        </div>
+
+
         <!-- Students Section -->
         <div class="form-group">
-          <label>Students</label>
+          <label>Assign Registered Student</label>
           <div id="studentList" class="student-list"></div>
-          <div class="add-student-row">
-            <input type="text" id="studentName" placeholder="Student name" />
-            <input type="number" id="studentAge" placeholder="Age" min="1" max="100" style="width:80px" />
+          <div class="add-student-row" style="grid-template-columns: 1fr auto;">
+            <select id="bookingStudentSelect">
+              <option value="">— Select an existing student —</option>
+            </select>
             <button class="btn-ghost small" onclick="addStudent()">+ Add</button>
           </div>
-          <div id="studentError" class="error-msg hidden">Please enter a student name.</div>
+          <div id="studentError" class="error-msg hidden">Please select a student.</div>
         </div>
+
       </div>
 
       <div class="modal-footer">
@@ -219,6 +252,50 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- REGISTER STUDENT MODAL -->
+  <div id="studentModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 400px;">
+      <div class="modal-header">
+        <h2>Register New Student</h2>
+        <button class="modal-close" onclick="closeStudentModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="newStudentName" placeholder="e.g. Liam Smith" />
+        </div>
+        <div class="form-group">
+          <label>Age (Optional)</label>
+          <input type="number" id="newStudentAge" min="1" max="100" placeholder="e.g. 10" />
+        </div>
+        <div class="form-group">
+          <label>Parent/Guardian Name</label>
+          <input type="text" id="newStudentParent" placeholder="e.g. Michael Smith" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Parent Contact Number</label>
+            <input type="tel" id="newStudentPhone" placeholder="e.g. 082 123 4567" />
+          </div>
+          <div class="form-group">
+            <label>Parent Email</label>
+            <input type="email" id="newStudentEmail" placeholder="e.g. michael@example.com" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Internal Notes</label>
+          <textarea id="newStudentNotes" rows="2" placeholder="Allergies, preferences, etc."></textarea>
+        </div>
+        <div id="studentModalError" class="error-msg hidden">Please provide a name.</div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closeStudentModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveNewStudent()">Register Student</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

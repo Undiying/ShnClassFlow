@@ -702,6 +702,25 @@ html, body {
 }
 .add-student-row input { margin: 0; }
 
+.detail-notes {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: rgba(255, 166, 0, 0.1);
+  border-left: 4px solid #ffa600;
+  border-radius: 8px;
+}
+.detail-notes h4 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: #ffa600;
+}
+.detail-notes p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
 /* ── BOOKINGS LIST VIEW ──────────────────────────────────────── */
 
 .bookings-list {
