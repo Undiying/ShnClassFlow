@@ -70,22 +70,35 @@ async function getStudents() {
     const raw = localStorage.getItem('cf_students');
     return raw ? JSON.parse(raw) : [];
   }
-  // Fallback to localStorage if the students table doesn't exist yet
-  const { data, error } = await sb.from('students').select('*').catch(() => ({error: true}));
-  if (error) {
+  try {
+    const { data, error } = await sb.from('students').select('*');
+    if (error) {
+      console.warn('Supabase getStudents error (falling back to local):', error.message);
+      const raw = localStorage.getItem('cf_students');
+      return raw ? JSON.parse(raw) : [];
+    }
+    return data || [];
+  } catch (err) {
+    console.error('Supabase getStudents exception:', err);
     const raw = localStorage.getItem('cf_students');
     return raw ? JSON.parse(raw) : [];
   }
-  return data || [];
 }
+
 
 async function saveStudents(students) {
   if (!sb || SUPABASE_URL.includes('YOUR')) {
     localStorage.setItem('cf_students', JSON.stringify(students));
     return;
   }
-  const { error } = await sb.from('students').upsert(students).catch(() => ({error: true}));
-  if (error) {
+  try {
+    const { error } = await sb.from('students').upsert(students);
+    if (error) {
+      console.warn('Supabase saveStudents error (falling back to local):', error.message);
+      localStorage.setItem('cf_students', JSON.stringify(students));
+    }
+  } catch (err) {
+    console.error('Supabase saveStudents exception:', err);
     localStorage.setItem('cf_students', JSON.stringify(students));
   }
 }
