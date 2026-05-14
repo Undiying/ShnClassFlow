@@ -314,6 +314,28 @@
       </div>
     </div>
   </div>
+  <!-- Archive Student Modal -->
+  <div id="archiveModal" class="modal hidden">
+    <div class="modal-content small">
+      <div class="modal-header">
+        <h2>Archive Student</h2>
+        <button class="modal-close" onclick="closeArchiveModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="sub" id="archiveStudentPrompt">Why is this student being removed?</p>
+        <div class="form-group" style="margin-top: 15px;">
+          <label>Reason for Removal</label>
+          <textarea id="archiveReason" rows="3" placeholder="e.g. Moved away, graduated, financial reasons..."></textarea>
+        </div>
+        <div id="archiveError" class="error-msg hidden">Please provide a reason.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closeArchiveModal()">Cancel</button>
+        <button class="btn-primary" onclick="confirmArchiveStudent()" style="background: var(--danger); border-color: var(--danger)">Archive Student</button>
+      </div>
+    </div>
+  </div>
+
 
   <script src="app.js"></script>
 </body>

@@ -341,8 +341,11 @@ if (isDashboard) {
 
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+    // Only show students who haven't been archived
+    const activeStudents = students.filter(s => !s.deletedAt);
+
     // Map students to their enrolled sessions
-    const enrichedStudents = students.map(s => {
+    const enrichedStudents = activeStudents.map(s => {
       const studentSessions = sessions.filter(sess => 
         sess.students && sess.students.some(st => st.id === s.id)
       );
@@ -392,9 +395,10 @@ if (isDashboard) {
             <div class="user-meta">${s.parentPhone || 'No phone'}</div>
             <div class="user-meta">${s.parentEmail || 'No email'}</div>
           </div>
-          <div style="flex:3; color: var(--text-2); font-size: 0.8rem; line-height: 1.4;">
+          <div style="flex:3; color: var(--text-2); font-size: 0.8rem; line-height: 1.4; position: relative; padding-right: 30px;">
             <strong style="display:block; margin-bottom: 2px; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Notes</strong>
             ${s.notes || 'No notes'}
+            <button class="remove-btn" onclick="openArchiveModal('${s.id}')" title="Archive Student" style="position: absolute; top: 0; right: 0;">✕</button>
           </div>
         </div>
       `;
@@ -453,9 +457,45 @@ if (isDashboard) {
     if (!document.getElementById('bookingModal').classList.contains('hidden')) {
       populateStudentDropdown('bookingStudentSelect');
     }
-    if (!document.getElementById('detailModal').classList.contains('hidden')) {
-      populateStudentDropdown('editStudentSelect');
+  };
+
+  let currentStudentToArchive = null;
+
+  window.openArchiveModal = async function(id) {
+    const students = await getStudents();
+    const student = students.find(s => s.id === id);
+    if (!student) return;
+    
+    currentStudentToArchive = id;
+    document.getElementById('archiveStudentPrompt').textContent = `Why is ${student.name} being removed?`;
+    document.getElementById('archiveReason').value = '';
+    document.getElementById('archiveError').classList.add('hidden');
+    document.getElementById('archiveModal').classList.remove('hidden');
+  };
+
+  window.closeArchiveModal = function() {
+    document.getElementById('archiveModal').classList.add('hidden');
+    currentStudentToArchive = null;
+  };
+
+  window.confirmArchiveStudent = async function() {
+    const reason = document.getElementById('archiveReason').value.trim();
+    if (!reason) {
+      document.getElementById('archiveError').classList.remove('hidden');
+      return;
     }
+
+    const students = await getStudents();
+    const idx = students.findIndex(s => s.id === currentStudentToArchive);
+    if (idx !== -1) {
+      students[idx].deletedAt = new Date().toISOString();
+      students[idx].removalReason = reason;
+      students[idx].archivedBy = user.name;
+      await saveStudents(students);
+    }
+
+    closeArchiveModal();
+    renderGlobalStudentsList();
   };
 
 
