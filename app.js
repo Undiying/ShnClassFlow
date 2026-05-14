@@ -69,6 +69,29 @@ async function saveSessions(sessions) {
   const { error } = await sb.from('sessions').upsert(cleanSessions);
   if (error) console.error('Supabase saveSessions error:', error);
 }
+function groupSessions(sessions) {
+  const grouped = {};
+  sessions.forEach(s => {
+    // Key: Explorer_09:00:00_1 (for recurring Mon) or Explorer_09:00:00_2024-05-13 (for one-off)
+    const key = `${s.classType}_${s.time}_${s.isRecurring ? s.dayOfWeek : s.date}`;
+    if (!grouped[key]) {
+      grouped[key] = { ...s, students: [...(s.students || [])] };
+    } else {
+      // Merge students uniquely
+      const existingIds = new Set(grouped[key].students.map(st => st.id));
+      (s.students || []).forEach(st => {
+        if (!existingIds.has(st.id)) {
+          grouped[key].students.push(st);
+        }
+      });
+      // Merge notes if different
+      if (s.notes && s.notes !== grouped[key].notes) {
+        grouped[key].notes = grouped[key].notes ? grouped[key].notes + "\n" + s.notes : s.notes;
+      }
+    }
+  });
+  return Object.values(grouped);
+}
 
 async function getStudents() {
   if (!sb || SUPABASE_URL.includes('YOUR')) {
@@ -427,13 +450,13 @@ if (isDashboard) {
 
       grid.innerHTML = days.map((d, i) => {
         const ds = dateToStr(d);
-        const daySessions = weekSessions
+        const daySessions = groupSessions(weekSessions
           .filter(s => {
             if (s.isRecurring) {
               return parseInt(s.dayOfWeek) === d.getDay();
             }
             return s.date === ds;
-          })
+          }))
           .sort((a, b) => a.time.localeCompare(b.time));
 
 
@@ -474,13 +497,13 @@ if (isDashboard) {
     const targetDateStr = dateToStr(targetDate);
 
     container.innerHTML = types.map(type => {
-      const typeSessions = allSessions.filter(s => {
+      const typeSessions = groupSessions(allSessions.filter(s => {
         if (s.classType !== type) return false;
         if (s.isRecurring) {
           return parseInt(s.dayOfWeek) === currentOverviewDay;
         }
         return s.date === targetDateStr;
-      }).sort((a, b) => a.time.localeCompare(b.time));
+      })).sort((a, b) => a.time.localeCompare(b.time));
 
       const totalEnrolled = typeSessions.reduce((acc, s) => acc + (s.students?.length || 0), 0);
       const totalSlots = typeSessions.length * 9;
@@ -764,6 +787,22 @@ if (isDashboard) {
 
 
     const sessions = await getSessions();
+    
+    // Duplicate check for Teachers (Recurring slots)
+    if (isTeacher) {
+      const exists = sessions.find(s => 
+        s.isRecurring && 
+        s.classType === session.classType && 
+        s.dayOfWeek === session.dayOfWeek && 
+        s.time === session.time
+      );
+      if (exists) {
+        errEl.textContent = 'This time slot already exists. Please edit the existing slot instead.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+    }
+
     sessions.push(session);
     await saveSessions(sessions);
 

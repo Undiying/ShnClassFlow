@@ -1013,8 +1013,8 @@ html, body {
 .seating-map .seat {
   height: 12px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid var(--glass-border);
+  background: var(--border);
+  border: 1px solid var(--border-strong);
 }
 
 .type-selector {
