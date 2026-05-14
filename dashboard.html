@@ -158,7 +158,15 @@
       </div>
       <div class="admin-grid">
         <div class="admin-card" style="grid-column: 1 / -1">
-          <h3>All Students</h3>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem; flex-wrap:wrap; gap:1rem">
+            <h3>All Students</h3>
+            <div class="day-selector" id="studentCategorySelector">
+              <button class="day-btn active" onclick="selectStudentCategory('Explorer')">Explorer</button>
+              <button class="day-btn" onclick="selectStudentCategory('Junior')">Junior</button>
+              <button class="day-btn" onclick="selectStudentCategory('Intro')">Intro</button>
+              <button class="day-btn" onclick="selectStudentCategory('Unassigned')">Unassigned</button>
+            </div>
+          </div>
           <div id="globalStudentList" class="user-list"></div>
         </div>
       </div>

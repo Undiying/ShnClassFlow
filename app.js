@@ -300,6 +300,16 @@ if (isDashboard) {
     getSessions().then(renderClassOverview);
   };
 
+  let currentStudentCategory = 'Explorer';
+
+  window.selectStudentCategory = function(cat) {
+    currentStudentCategory = cat;
+    document.querySelectorAll('#studentCategorySelector .day-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.textContent === cat);
+    });
+    renderGlobalStudentsList();
+  };
+
   // ── Navigation ────────────────────────────────────────────
 
   document.querySelectorAll('.nav-item').forEach(item => {
@@ -320,31 +330,70 @@ if (isDashboard) {
 
   async function renderGlobalStudentsList() {
     const students = await getStudents();
+    const sessions = await getSessions();
     const container = document.getElementById('globalStudentList');
     if (!container) return;
-    
-    if (students.length === 0) {
-      container.innerHTML = '<p class="sub">No students registered yet.</p>';
+
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    // Map students to their enrolled sessions
+    const enrichedStudents = students.map(s => {
+      const studentSessions = sessions.filter(sess => 
+        sess.students && sess.students.some(st => st.id === s.id)
+      );
+      
+      const enrollments = studentSessions.map(sess => {
+        const dayName = sess.isRecurring ? days[sess.dayOfWeek] : formatDate(sess.date);
+        return {
+          type: sess.classType,
+          display: `${dayName} @ ${formatTime(sess.time)}`
+        };
+      });
+
+      return { ...s, enrollments };
+    });
+
+    // Filter by category
+    let filtered;
+    if (currentStudentCategory === 'Unassigned') {
+      filtered = enrichedStudents.filter(s => s.enrollments.length === 0);
+    } else {
+      filtered = enrichedStudents.filter(s => 
+        s.enrollments.some(e => e.type === currentStudentCategory)
+      );
+    }
+
+    if (filtered.length === 0) {
+      container.innerHTML = `<p class="sub" style="padding: 2rem; text-align: center;">No students found for "${currentStudentCategory}".</p>`;
       return;
     }
-    
-    container.innerHTML = students.map(s => `
-      <div class="user-row">
-        <div class="user-avatar">${s.name.charAt(0).toUpperCase()}</div>
-        <div style="flex:2">
-          <div class="user-name">${s.name}</div>
-          <div class="user-meta">Age: ${s.age || 'N/A'}</div>
-        </div>
-        <div style="flex:3;">
-          <div class="user-name">${s.parentName || 'No Parent'}</div>
-          <div class="user-meta">${s.parentPhone || 'No phone'} · ${s.parentEmail || 'No email'}</div>
-        </div>
-        <div style="flex:3; color: var(--text-2); font-size: 0.8rem;">
-          ${s.notes || 'No notes'}
-        </div>
-      </div>
-    `).join('');
 
+    container.innerHTML = filtered.map(s => {
+      const catEnrollments = s.enrollments
+        .filter(e => currentStudentCategory === 'Unassigned' ? true : e.type === currentStudentCategory)
+        .map(e => e.display)
+        .join(', ');
+
+      return `
+        <div class="user-row" style="align-items: flex-start; padding: 1.5rem 1.25rem;">
+          <div class="user-avatar">${s.name.charAt(0).toUpperCase()}</div>
+          <div style="flex:2">
+            <div class="user-name" style="font-size: 1rem">${s.name}</div>
+            <div class="user-meta">Age: ${s.age || 'N/A'}</div>
+            ${catEnrollments ? `<div class="role-badge" style="margin-top:8px; display:inline-block; font-size:10px; background: var(--accent-light); color: var(--accent); border: 1px solid var(--border)">Enrolled: ${catEnrollments}</div>` : ''}
+          </div>
+          <div style="flex:3;">
+            <div class="user-name" style="font-size: 0.9rem; margin-bottom: 2px;">Parent: ${s.parentName || 'No Parent'}</div>
+            <div class="user-meta">${s.parentPhone || 'No phone'}</div>
+            <div class="user-meta">${s.parentEmail || 'No email'}</div>
+          </div>
+          <div style="flex:3; color: var(--text-2); font-size: 0.8rem; line-height: 1.4;">
+            <strong style="display:block; margin-bottom: 2px; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Notes</strong>
+            ${s.notes || 'No notes'}
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
   // ── Student Modal ─────────────────────────────────────────
