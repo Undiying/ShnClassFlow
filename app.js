@@ -268,6 +268,11 @@ if (isDashboard) {
   document.getElementById('sidebarAvatar').textContent = user.name.charAt(0).toUpperCase();
 
   // Role-specific UI
+  if (user.role === 'admin') {
+    const navAdmin = document.getElementById('navAdmin');
+    if (navAdmin) navAdmin.style.display = 'flex';
+  }
+
   if (user.role === 'teacher') {
     document.getElementById('bookBtn').textContent = '+ Create Time Slot';
     document.getElementById('bookBtn2').textContent = '+ Create Time Slot';
