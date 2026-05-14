@@ -63,6 +63,7 @@ async function saveSessions(sessions) {
   }
   const cleanSessions = sessions.map(s => {
     const { type, ...rest } = s;
+    if (rest.date === '') rest.date = null;
     return rest;
   });
   const { error } = await sb.from('sessions').upsert(cleanSessions);
@@ -709,7 +710,7 @@ if (isDashboard) {
     const teacherId = document.getElementById('sessionTeacher').value;
     const notes = document.getElementById('sessionNotes').value.trim();
 
-    let date = '';
+    let date = null;
     let dayOfWeek = null;
 
 
@@ -961,13 +962,14 @@ if (isDashboard) {
       : '';
 
     const isTeacher = user.role === 'teacher';
+    const finalDate = (isTeacher || !date) ? null : date;
 
     // Update session
     sessions[idx] = {
       ...sessions[idx],
       name,
       classType: document.getElementById('editClassType')?.value || sessions[idx].classType,
-      date,
+      date: finalDate,
       time,
       duration,
       maxStudents: isTeacher ? 9 : maxStudents,
