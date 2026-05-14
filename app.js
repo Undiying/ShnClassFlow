@@ -957,6 +957,8 @@ if (isDashboard) {
       ? allUsers.find(u => u.id === teacherId)?.name || ''
       : '';
 
+    const isTeacher = user.role === 'teacher';
+
     // Update session
     sessions[idx] = {
       ...sessions[idx],
@@ -967,6 +969,7 @@ if (isDashboard) {
       duration,
       maxStudents: isTeacher ? 9 : maxStudents,
       teacherId,
+
       teacherName,
       notes,
       students: [...pendingStudents]
