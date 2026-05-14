@@ -48,7 +48,7 @@
       <div class="view-header">
         <div>
           <h1 id="weekLabel">Week</h1>
-          <p class="view-sub">Weekly class schedule</p>
+          <p class="view-sub" id="viewSub">Weekly class schedule</p>
         </div>
         <div class="header-actions">
           <button class="btn-ghost" onclick="shiftWeek(-1)">← Prev</button>
@@ -61,7 +61,19 @@
       <div class="calendar-grid" id="calendarGrid">
         <!-- Rendered by JS -->
       </div>
+
+      <!-- Class Seating Overview -->
+      <div class="class-summary-section">
+        <div class="class-type-header">
+          <h2>Class Occupancy Overview</h2>
+          <p class="view-sub" style="margin:0">Live seating status for selected week</p>
+        </div>
+        <div class="class-summary-grid" id="classSummaryGrid">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
     </section>
+
 
     <!-- ALL BOOKINGS VIEW -->
     <section id="viewBookings" class="view">
@@ -132,7 +144,7 @@
 
       <div class="modal-body">
         <div class="form-row">
-          <div class="form-group">
+          <div class="form-group" id="dateGroup">
             <label>Date</label>
             <input type="date" id="sessionDate" />
           </div>
@@ -144,11 +156,10 @@
 
         <div class="form-group">
           <label>Duration</label>
-          <div class="toggle-group">
-            <button class="toggle-btn active" data-val="60" onclick="selectDuration(this)">1 Hour</button>
-            <button class="toggle-btn" data-val="120" onclick="selectDuration(this)">2 Hours</button>
-          </div>
-          <input type="hidden" id="sessionDuration" value="60" />
+          <select id="sessionDuration">
+            <option value="60">1 Hour</option>
+            <option value="120">2 Hours</option>
+          </select>
         </div>
 
         <div class="form-group">
