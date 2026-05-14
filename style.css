@@ -956,13 +956,67 @@ html, body {
 .seat.filled.Junior { background: #10b981; border-color: #10b981; }
 .seat.filled.Intro { background: #f59e0b; border-color: #f59e0b; }
 
-
 .occupancy-text {
   font-size: 0.8rem;
   color: var(--text-2);
 }
 
-/* Modal Adjustments */
+/* Day Selector */
+.day-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.day-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.day-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-1); }
+.day-btn.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(0, 195, 255, 0.2);
+}
+
+/* Slim Session Cards */
+.session-card.slim {
+  padding: 6px 8px;
+  border-left-width: 3px;
+  gap: 2px;
+}
+.session-card.slim .session-type-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  margin-bottom: 2px;
+}
+.session-card.slim .session-time {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+}
+
+/* Seating Grid Fix */
+.seating-map {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 4px;
+}
+.seating-map .seat {
+  height: 12px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--glass-border);
+}
+
 .type-selector {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -987,4 +1041,5 @@ html, body {
   color: white;
   border-color: var(--primary);
 }
+
 

@@ -68,9 +68,20 @@
 
       <!-- Class Seating Overview -->
       <div class="class-summary-section">
-        <div class="class-type-header">
-          <h2>Class Occupancy Overview</h2>
-          <p class="view-sub" style="margin:0">Live seating status for selected week</p>
+        <div class="class-type-header" style="flex-direction: column; align-items: flex-start; gap: 1rem;">
+          <div>
+            <h2>Class Occupancy Overview</h2>
+            <p class="view-sub" style="margin:0">Live seating status for selected day</p>
+          </div>
+          <div class="day-selector" id="daySelector">
+            <button class="day-btn active" onclick="selectOverviewDay(1)">Mon</button>
+            <button class="day-btn" onclick="selectOverviewDay(2)">Tue</button>
+            <button class="day-btn" onclick="selectOverviewDay(3)">Wed</button>
+            <button class="day-btn" onclick="selectOverviewDay(4)">Thu</button>
+            <button class="day-btn" onclick="selectOverviewDay(5)">Fri</button>
+            <button class="day-btn" onclick="selectOverviewDay(6)">Sat</button>
+            <button class="day-btn" onclick="selectOverviewDay(0)">Sun</button>
+          </div>
         </div>
         <div class="class-summary-grid" id="classSummaryGrid">
           <!-- Rendered by JS -->

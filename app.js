@@ -263,6 +263,19 @@ if (isDashboard) {
   let currentWeekMonday = getMondayOf(new Date());
   let pendingStudents = [];
   let currentDetailId = null;
+  let currentOverviewDay = 1; // Default to Monday to match UI
+
+  window.selectOverviewDay = function(dayIndex) {
+    currentOverviewDay = dayIndex;
+    document.querySelectorAll('#daySelector .day-btn').forEach(btn => btn.classList.remove('active'));
+    // Find the button corresponding to this dayIndex. The buttons are ordered Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6, Sun=0.
+    // In our HTML: Mon is index 0, Sun is index 6.
+    const btns = document.querySelectorAll('#daySelector .day-btn');
+    const mapping = {1:0, 2:1, 3:2, 4:3, 5:4, 6:5, 0:6};
+    if (btns[mapping[dayIndex]]) btns[mapping[dayIndex]].classList.add('active');
+    
+    getSessions().then(renderClassOverview);
+  };
 
   // ── Navigation ────────────────────────────────────────────
 
@@ -454,8 +467,21 @@ if (isDashboard) {
     const types = ['Explorer', 'Junior', 'Intro'];
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+    // Determine the exact date for the currently selected day in the current week
+    const targetDate = new Date(currentWeekMonday);
+    const offset = currentOverviewDay === 0 ? 6 : currentOverviewDay - 1;
+    targetDate.setDate(targetDate.getDate() + offset);
+    const targetDateStr = dateToStr(targetDate);
+
     container.innerHTML = types.map(type => {
-      const typeSessions = allSessions.filter(s => s.classType === type);
+      const typeSessions = allSessions.filter(s => {
+        if (s.classType !== type) return false;
+        if (s.isRecurring) {
+          return parseInt(s.dayOfWeek) === currentOverviewDay;
+        }
+        return s.date === targetDateStr;
+      }).sort((a, b) => a.time.localeCompare(b.time));
+
       const totalEnrolled = typeSessions.reduce((acc, s) => acc + (s.students?.length || 0), 0);
       const totalSlots = typeSessions.length * 9;
 
@@ -469,25 +495,24 @@ if (isDashboard) {
           <div class="session-seating-list">
             ${typeSessions.length === 0 
               ? '<p class="sub">No slots scheduled</p>' 
-              : typeSessions.slice(0, 3).map(s => {
+              : typeSessions.map(s => {
                   const enrolled = s.students?.length || 0;
-                  const dayName = s.isRecurring ? days[s.dayOfWeek] : formatDate(s.date);
+                  const dayName = days[currentOverviewDay];
                   return `
-                    <div style="margin-bottom: 12px;">
-                      <div class="sub" style="margin-bottom: 4px; display:flex; justify-content:space-between">
+                    <div style="margin-bottom: 16px;">
+                      <div class="sub" style="margin-bottom: 6px; display:flex; justify-content:space-between; font-weight:500;">
                         <span>${dayName} @ ${formatTime(s.time)}</span>
                         <span>${enrolled}/9</span>
                       </div>
                       <div class="seating-map">
                         ${Array.from({ length: 9 }).map((_, i) => `
-                          <div class="seat ${i < enrolled ? 'filled ' + type : ''}"></div>
+                          <div class="seat ${i < enrolled ? 'filled ' + type : ''}" title="${i < enrolled ? s.students[i].name : 'Empty'}"></div>
                         `).join('')}
                       </div>
                     </div>
                   `;
                 }).join('')
             }
-            ${typeSessions.length > 3 ? `<p class="sub" style="text-align:center">+ ${typeSessions.length - 3} more slots</p>` : ''}
           </div>
         </div>
       `;
@@ -498,7 +523,6 @@ if (isDashboard) {
   function renderSessionCard(s) {
     const enrolled = s.students ? s.students.length : 0;
     const max = s.maxStudents || 10;
-    const pct = Math.round((enrolled / max) * 100);
     const full = enrolled >= max;
     const endTime = addMinutes(s.time, s.duration);
     const isRecurring = s.isRecurring;
@@ -506,23 +530,9 @@ if (isDashboard) {
     const typeClass = s.classType || 'Free';
 
     return `
-      <div class="session-card ${full ? 'full' : ''} ${isRecurring ? 'recurring' : 'one-off'}" onclick="openDetailModal('${s.id}')">
+      <div class="session-card slim ${full ? 'full' : ''} ${isRecurring ? 'recurring' : 'one-off'}" onclick="openDetailModal('${s.id}')">
         <div class="session-type-badge ${typeClass}">${typeClass}</div>
-        <div class="session-name">${s.name}</div>
-        <div class="session-time">${formatTime(s.time)} – ${formatTime(endTime)}</div>
-        <div class="session-teacher">${s.teacherName || 'No teacher assigned'}</div>
-        <div class="session-capacity">
-          <div class="capacity-bar">
-            <div class="capacity-fill" style="width:${Math.min(pct,100)}%"></div>
-          </div>
-          <span class="capacity-label ${full ? 'capacity-full' : ''}">${enrolled}/${max} ${full ? '· FULL' : ''}</span>
-          
-          <div class="seating-map mini" style="margin-top: 8px;">
-            ${Array.from({ length: 9 }).map((_, i) => `
-              <div class="seat ${i < enrolled ? 'filled ' + typeClass : ''}" style="width:12px; height:12px; gap:4px"></div>
-            `).join('')}
-          </div>
-        </div>
+        <div class="session-time" style="margin-top:6px; font-weight:500;">${formatTime(s.time)} – ${formatTime(endTime)}</div>
       </div>
     `;
   }
