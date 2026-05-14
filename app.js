@@ -61,7 +61,11 @@ async function saveSessions(sessions) {
     localStorage.setItem('cf_sessions', JSON.stringify(sessions));
     return;
   }
-  const { error } = await sb.from('sessions').upsert(sessions);
+  const cleanSessions = sessions.map(s => {
+    const { type, ...rest } = s;
+    return rest;
+  });
+  const { error } = await sb.from('sessions').upsert(cleanSessions);
   if (error) console.error('Supabase saveSessions error:', error);
 }
 
@@ -730,7 +734,6 @@ if (isDashboard) {
 
     const session = {
       id: uid(),
-      type: isTeacher ? 'class' : 'free',
       classType: document.getElementById('classType').value,
       isRecurring: isTeacher,
       dayOfWeek: dayOfWeek,
