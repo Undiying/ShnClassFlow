@@ -222,9 +222,10 @@
   <div id="studentModal" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <h2>Register New Student</h2>
+        <h2 id="studentModalTitle">Register New Student</h2>
         <button class="modal-close" onclick="closeStudentModal()">✕</button>
       </div>
+      <input type="hidden" id="editStudentId" value="" />
       <div class="modal-body">
         <p class="sub" style="margin-bottom:1.2rem">Fill in the student's details and assign them to a class time slot.</p>
 
@@ -282,7 +283,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn-ghost" onclick="closeStudentModal()">Cancel</button>
-        <button class="btn-primary" onclick="saveNewStudent()">Register Student</button>
+        <button class="btn-primary" id="studentSaveBtn" onclick="saveNewStudent()">Register Student</button>
       </div>
     </div>
   </div>

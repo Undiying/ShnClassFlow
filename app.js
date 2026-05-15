@@ -450,10 +450,13 @@ if (isDashboard) {
             <div class="user-meta">${s.parentPhone || 'No phone'}</div>
             <div class="user-meta">${s.parentEmail || 'No email'}</div>
           </div>
-          <div style="flex:3; color: var(--text-2); font-size: 0.8rem; line-height: 1.4; position: relative; padding-right: 30px;">
+          <div style="flex:3; color: var(--text-2); font-size: 0.8rem; line-height: 1.4; position: relative; padding-right: 60px;">
             <strong style="display:block; margin-bottom: 2px; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Notes</strong>
             ${s.notes || 'No notes'}
-            <button class="remove-btn" onclick="openArchiveModal('${s.id}')" title="Archive Student" style="position: absolute; top: 0; right: 0;">✕</button>
+            <div style="position: absolute; top: 0; right: 0; display: flex; gap: 4px;">
+              <button class="remove-btn" onclick="openEditStudentModal('${s.id}')" title="Edit Student" style="background: var(--surface-3); border: 1px solid var(--border);">✎</button>
+              <button class="remove-btn" onclick="openArchiveModal('${s.id}')" title="Archive Student">✕</button>
+            </div>
           </div>
         </div>
       `;
@@ -486,6 +489,10 @@ if (isDashboard) {
   }
 
   window.openStudentModal = function() {
+    document.getElementById('editStudentId').value = '';
+    document.getElementById('studentModalTitle').textContent = 'Register New Student';
+    document.getElementById('studentSaveBtn').textContent = 'Register Student';
+    
     document.getElementById('newStudentName').value = '';
     document.getElementById('newStudentAge').value = '';
     document.getElementById('newStudentNotes').value = '';
@@ -500,11 +507,51 @@ if (isDashboard) {
     document.getElementById('studentModal').classList.remove('hidden');
   };
 
+  window.openEditStudentModal = async function(id) {
+    const students = await getStudents();
+    const s = students.find(x => x.id === id);
+    if (!s) return;
+
+    document.getElementById('editStudentId').value = id;
+    document.getElementById('studentModalTitle').textContent = 'Edit Student Details';
+    document.getElementById('studentSaveBtn').textContent = 'Save Changes';
+
+    document.getElementById('newStudentName').value = s.name;
+    document.getElementById('newStudentAge').value = s.age || '';
+    document.getElementById('newStudentParent').value = s.parentName || '';
+    document.getElementById('newStudentPhone').value = s.parentPhone || '';
+    document.getElementById('newStudentEmail').value = s.parentEmail || '';
+    document.getElementById('newStudentNotes').value = s.notes || '';
+    document.getElementById('studentModalError').classList.add('hidden');
+
+    // Find their current recurring class to set type
+    const sessions = await getSessions();
+    const currentSess = sessions.find(sess => sess.isRecurring && sess.students && sess.students.some(st => st.id === id));
+    
+    if (currentSess) {
+      const type = currentSess.classType;
+      document.getElementById('newStudentClassType').value = type;
+      document.querySelectorAll('#studentRegTypeSelector .type-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent === type);
+      });
+      await populateSlotDropdown(type);
+      document.getElementById('newStudentSlot').value = currentSess.id;
+    } else {
+      // Default to Explorer if not found
+      document.querySelectorAll('#studentRegTypeSelector .type-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+      document.getElementById('newStudentClassType').value = 'Explorer';
+      await populateSlotDropdown('Explorer');
+    }
+
+    document.getElementById('studentModal').classList.remove('hidden');
+  };
+
   window.closeStudentModal = function() {
     document.getElementById('studentModal').classList.add('hidden');
   };
 
   window.saveNewStudent = async function() {
+    const editId = document.getElementById('editStudentId').value;
     const name = document.getElementById('newStudentName').value.trim();
     const age = document.getElementById('newStudentAge').value.trim();
     const parentName = document.getElementById('newStudentParent')?.value.trim() || '';
@@ -520,34 +567,72 @@ if (isDashboard) {
       return;
     }
 
-    const newStudent = {
-      id: 'st' + Math.random().toString(36).substr(2, 9),
-      name,
-      age: age || '',
-      parentName,
-      parentPhone,
-      parentEmail,
-      notes: notes || '',
-      createdAt: new Date().toISOString()
-    };
-
     const students = await getStudents();
-    students.push(newStudent);
+    let studentObj;
+
+    if (editId) {
+      const idx = students.findIndex(s => s.id === editId);
+      if (idx === -1) return;
+      students[idx] = {
+        ...students[idx],
+        name, 
+        age: age || '', 
+        parentName, 
+        parentPhone, 
+        parentEmail, 
+        notes: notes || ''
+      };
+      studentObj = students[idx];
+    } else {
+      studentObj = {
+        id: 'st' + Math.random().toString(36).substr(2, 9),
+        name,
+        age: age || '',
+        parentName,
+        parentPhone,
+        parentEmail,
+        notes: notes || '',
+        createdAt: new Date().toISOString()
+      };
+      students.push(studentObj);
+    }
+
     await saveStudents(students);
 
-    // Assign to selected time slot
+    // Assign to selected time slot / Handle transfers
+    const sessions = await getSessions();
+    
+    if (editId) {
+      // Update student info in all current sessions, and handle transfer if slot changed
+      sessions.forEach(sess => {
+        if (sess.students) {
+          const sIdx = sess.students.findIndex(st => st.id === editId);
+          if (sIdx !== -1) {
+            if (slotId && sess.id !== slotId && sess.isRecurring) {
+              // Transfer: Remove from old recurring slot
+              sess.students.splice(sIdx, 1);
+            } else {
+              // Just update info
+              sess.students[sIdx].name = name;
+              sess.students[sIdx].age = age || '';
+            }
+          }
+        }
+      });
+    }
+
     if (slotId) {
-      const sessions = await getSessions();
       const idx = sessions.findIndex(s => s.id === slotId);
       if (idx !== -1) {
         if (!sessions[idx].students) sessions[idx].students = [];
-        const alreadyIn = sessions[idx].students.some(st => st.id === newStudent.id);
+        const alreadyIn = sessions[idx].students.some(st => st.id === studentObj.id);
         if (!alreadyIn) {
-          sessions[idx].students.push({ id: newStudent.id, name: newStudent.name, age: newStudent.age });
-          await saveSessions(sessions);
+          sessions[idx].students.push({ id: studentObj.id, name: studentObj.name, age: studentObj.age });
         }
       }
     }
+    
+    await saveSessions(sessions);
 
     closeStudentModal();
     renderGlobalStudentsList();
