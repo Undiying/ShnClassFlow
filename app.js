@@ -474,7 +474,13 @@ if (isDashboard) {
     const sel = document.getElementById('newStudentSlot');
     if (!sel) return;
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const slots = sessions.filter(s => s.classType === classType && s.isRecurring);
+    let slots = sessions.filter(s => s.classType === classType && s.isRecurring);
+
+    // Teachers only see their own slots
+    if (user.role === 'teacher') {
+      slots = slots.filter(s => s.teacherId === user.id);
+    }
+
     sel.innerHTML = '<option value="">— Select a time slot —</option>' +
       slots.map(s => `<option value="${s.id}">${days[s.dayOfWeek]} @ ${formatTime(s.time)}</option>`).join('');
   }
