@@ -120,15 +120,64 @@ async function saveStudents(students) {
     return;
   }
   try {
-    const { error } = await sb.from('students').upsert(students);
+    // Only upsert the active student records (exclude extra fields Supabase doesn't know about)
+    const clean = students.map(s => ({
+      id: s.id,
+      name: s.name,
+      age: s.age || null,
+      parentName: s.parentName || null,
+      parentPhone: s.parentPhone || null,
+      parentEmail: s.parentEmail || null,
+      notes: s.notes || null,
+      createdAt: s.createdAt || new Date().toISOString()
+    }));
+    const { error } = await sb.from('students').upsert(clean);
     if (error) {
       console.warn('Supabase saveStudents error (falling back to local):', error.message);
+      localStorage.setItem('cf_students', JSON.stringify(students));
+    } else {
       localStorage.setItem('cf_students', JSON.stringify(students));
     }
   } catch (err) {
     console.error('Supabase saveStudents exception:', err);
     localStorage.setItem('cf_students', JSON.stringify(students));
   }
+}
+
+async function deleteStudentById(id) {
+  // Remove from local cache
+  const raw = localStorage.getItem('cf_students');
+  const students = raw ? JSON.parse(raw) : [];
+  const updated = students.filter(s => s.id !== id);
+  localStorage.setItem('cf_students', JSON.stringify(updated));
+  
+  if (!sb || SUPABASE_URL.includes('YOUR')) return;
+  const { error } = await sb.from('students').delete().eq('id', id);
+  if (error) console.warn('Supabase deleteStudentById error:', error.message);
+}
+
+async function deleteSessionById(id) {
+  // Remove from local cache
+  const raw = localStorage.getItem('cf_sessions');
+  const sessions = raw ? JSON.parse(raw) : [];
+  const updated = sessions.filter(s => s.id !== id);
+  localStorage.setItem('cf_sessions', JSON.stringify(updated));
+
+  if (!sb || SUPABASE_URL.includes('YOUR')) return;
+  const { error } = await sb.from('sessions').delete().eq('id', id);
+  if (error) console.warn('Supabase deleteSessionById error:', error.message);
+}
+
+async function deleteUserById(id) {
+  // Remove from local cache
+  const raw = localStorage.getItem('cf_users');
+  const users = raw ? JSON.parse(raw) : DEFAULT_USERS;
+  const updated = users.filter(u => u.id !== id);
+  localStorage.setItem('cf_users', JSON.stringify(updated));
+
+  if (!sb || SUPABASE_URL.includes('YOUR')) return;
+  const { error } = await sb.from('profiles').delete().eq('id', id);
+  if (error) console.warn('Supabase deleteUserById error:', error.message);
 }
 
 
@@ -526,13 +575,19 @@ if (isDashboard) {
       return;
     }
 
-    const students = await getStudents();
+    // Store archive info in local cache (notes field is updated locally)
+    const raw = localStorage.getItem('cf_students');
+    const students = raw ? JSON.parse(raw) : [];
     const idx = students.findIndex(s => s.id === currentStudentToArchive);
     if (idx !== -1) {
+      // Mark archived locally only — then delete from Supabase
       students[idx].deletedAt = new Date().toISOString();
       students[idx].removalReason = reason;
       students[idx].archivedBy = user.name;
-      await saveStudents(students);
+      localStorage.setItem('cf_students', JSON.stringify(students));
+
+      // Permanently delete from Supabase
+      await deleteStudentById(currentStudentToArchive);
     }
 
     closeArchiveModal();
@@ -1309,9 +1364,7 @@ if (isDashboard) {
   window.deleteCurrentSession = async function () {
     if (!currentDetailId) return;
     if (!confirm('Are you sure you want to delete this session?')) return;
-    const allSessions = await getSessions();
-    const sessions = allSessions.filter(s => s.id !== currentDetailId);
-    await saveSessions(sessions);
+    await deleteSessionById(currentDetailId);
     closeDetailModal();
     renderCalendar();
     renderBookingsList();
@@ -1413,9 +1466,7 @@ if (isDashboard) {
 
   window.deleteUser = async function (id) {
     if (!confirm('Delete this user?')) return;
-    const allUsers = await getUsers();
-    const users = allUsers.filter(u => u.id !== id);
-    await saveUsers(users);
+    await deleteUserById(id);
     renderAdminPanel();
   };
 
