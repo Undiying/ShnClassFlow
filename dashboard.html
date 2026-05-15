@@ -155,6 +155,7 @@
           <p class="view-sub">Manage all registered students globally</p>
         </div>
         <button class="btn-primary" onclick="openStudentModal()" id="registerStudentBtn">+ Register Student</button>
+        <!-- Hidden for frontdesk via JS -->
       </div>
       <div class="admin-grid">
         <div class="admin-card" style="grid-column: 1 / -1">
@@ -186,62 +187,8 @@
         <button class="modal-close" onclick="closeBookingModal()">✕</button>
       </div>
 
-      <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group" id="dateGroup">
-            <label>Date</label>
-            <input type="date" id="sessionDate" />
-          </div>
-          <div class="form-group">
-            <label>Start Time</label>
-            <input type="time" id="sessionTime" />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>Duration</label>
-          <select id="sessionDuration">
-            <option value="60">1 Hour</option>
-            <option value="120">2 Hours</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label>Session Name / Subject</label>
-          <input type="text" id="sessionName" placeholder="e.g. Beginner Swimming" />
-        </div>
-
-        <div class="form-group">
-          <label>Max Students</label>
-          <input type="number" id="sessionMax" min="1" max="50" value="10" />
-        </div>
-
-        <div class="form-group">
-          <label>Assign Teacher</label>
-          <select id="sessionTeacher">
-            <option value="">— Select teacher —</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label>Admin/Front Desk Notes (for Teacher)</label>
-          <textarea id="sessionNotes" placeholder="e.g. John will be 10 mins late" rows="2"></textarea>
-        </div>
-
-
-        <!-- Students Section -->
-        <div class="form-group">
-          <label>Assign Registered Student</label>
-          <div id="studentList" class="student-list"></div>
-          <div class="add-student-row" style="grid-template-columns: 1fr auto;">
-            <select id="bookingStudentSelect">
-              <option value="">— Select an existing student —</option>
-            </select>
-            <button class="btn-ghost small" onclick="addStudent()">+ Add</button>
-          </div>
-          <div id="studentError" class="error-msg hidden">Please select a student.</div>
-        </div>
-
+      <div class="modal-body" id="bookingModalBody">
+        <!-- Populated by JS based on role -->
       </div>
 
       <div class="modal-footer">
@@ -273,20 +220,25 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- REGISTER STUDENT MODAL -->
   <div id="studentModal" class="modal-overlay hidden">
-    <div class="modal" style="max-width: 400px;">
+    <div class="modal">
       <div class="modal-header">
         <h2>Register New Student</h2>
         <button class="modal-close" onclick="closeStudentModal()">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-group">
-          <label>Full Name</label>
-          <input type="text" id="newStudentName" placeholder="e.g. Liam Smith" />
+        <p class="sub" style="margin-bottom:1.2rem">Fill in the student's details and assign them to a class time slot.</p>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Student Full Name</label>
+            <input type="text" id="newStudentName" placeholder="e.g. Liam Smith" />
+          </div>
+          <div class="form-group">
+            <label>Age</label>
+            <input type="number" id="newStudentAge" min="1" max="100" placeholder="e.g. 10" />
+          </div>
         </div>
-        <div class="form-group">
-          <label>Age (Optional)</label>
-          <input type="number" id="newStudentAge" min="1" max="100" placeholder="e.g. 10" />
-        </div>
+
         <div class="form-group">
           <label>Parent/Guardian Name</label>
           <input type="text" id="newStudentParent" placeholder="e.g. Michael Smith" />
@@ -305,8 +257,28 @@
           <label>Internal Notes</label>
           <textarea id="newStudentNotes" rows="2" placeholder="Allergies, preferences, etc."></textarea>
         </div>
-        <div id="studentModalError" class="error-msg hidden">Please provide a name.</div>
 
+        <hr style="border:none; border-top: 1px solid var(--border); margin: 1.2rem 0;" />
+        <h4 style="margin-bottom: 0.8rem; font-size:0.9rem; color: var(--text-2); text-transform:uppercase; letter-spacing:0.5px">Assign to Class</h4>
+
+        <div class="form-group">
+          <label>Class Level</label>
+          <div class="type-selector" id="studentRegTypeSelector">
+            <button class="type-btn active" onclick="selectStudentRegType('Explorer', this)">Explorer</button>
+            <button class="type-btn" onclick="selectStudentRegType('Junior', this)">Junior</button>
+            <button class="type-btn" onclick="selectStudentRegType('Intro', this)">Intro</button>
+          </div>
+          <input type="hidden" id="newStudentClassType" value="Explorer" />
+        </div>
+
+        <div class="form-group">
+          <label>Assign to Time Slot</label>
+          <select id="newStudentSlot">
+            <option value="">— Select a time slot —</option>
+          </select>
+        </div>
+
+        <div id="studentModalError" class="error-msg hidden">Please provide a name.</div>
       </div>
       <div class="modal-footer">
         <button class="btn-ghost" onclick="closeStudentModal()">Cancel</button>

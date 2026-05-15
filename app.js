@@ -273,14 +273,20 @@ if (isDashboard) {
     if (navAdmin) navAdmin.style.display = 'flex';
   }
 
+  // Front desk cannot register students
+  if (user.role === 'frontdesk') {
+    const regBtn = document.getElementById('registerStudentBtn');
+    if (regBtn) regBtn.style.display = 'none';
+  }
+
   if (user.role === 'teacher') {
     document.getElementById('bookBtn').textContent = '+ Create Time Slot';
     document.getElementById('bookBtn2').textContent = '+ Create Time Slot';
     document.getElementById('viewSub').textContent = 'Manage your weekly recurring time slots';
     document.getElementById('navBookings').innerHTML = '<span class="nav-icon">📚</span> My Time Slots';
   } else {
-    document.getElementById('bookBtn').textContent = '+ Book Session';
-    document.getElementById('bookBtn2').textContent = '+ Book Session';
+    document.getElementById('bookBtn').textContent = '+ Book Free Session';
+    document.getElementById('bookBtn2').textContent = '+ Book Free Session';
     document.getElementById('viewSub').textContent = 'Weekly class schedule';
   }
 
@@ -405,13 +411,37 @@ if (isDashboard) {
     }).join('');
   }
 
-  // ── Student Modal ─────────────────────────────────────────
+  // ── Student Modal helpers ────────────────────────────────────
+
+  window.selectStudentRegType = function(type, btn) {
+    document.querySelectorAll('#studentRegTypeSelector .type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('newStudentClassType').value = type;
+    populateSlotDropdown(type);
+  };
+
+  async function populateSlotDropdown(classType) {
+    const sessions = await getSessions();
+    const sel = document.getElementById('newStudentSlot');
+    if (!sel) return;
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const slots = sessions.filter(s => s.classType === classType && s.isRecurring);
+    sel.innerHTML = '<option value="">— Select a time slot —</option>' +
+      slots.map(s => `<option value="${s.id}">${days[s.dayOfWeek]} @ ${formatTime(s.time)}</option>`).join('');
+  }
 
   window.openStudentModal = function() {
     document.getElementById('newStudentName').value = '';
     document.getElementById('newStudentAge').value = '';
     document.getElementById('newStudentNotes').value = '';
+    document.getElementById('newStudentParent').value = '';
+    document.getElementById('newStudentPhone').value = '';
+    document.getElementById('newStudentEmail').value = '';
     document.getElementById('studentModalError').classList.add('hidden');
+    // Reset type selector
+    document.querySelectorAll('#studentRegTypeSelector .type-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+    document.getElementById('newStudentClassType').value = 'Explorer';
+    populateSlotDropdown('Explorer');
     document.getElementById('studentModal').classList.remove('hidden');
   };
 
@@ -426,10 +456,11 @@ if (isDashboard) {
     const parentPhone = document.getElementById('newStudentPhone')?.value.trim() || '';
     const parentEmail = document.getElementById('newStudentEmail')?.value.trim() || '';
     const notes = document.getElementById('newStudentNotes').value.trim();
+    const slotId = document.getElementById('newStudentSlot')?.value || '';
 
     if (!name || !parentName) {
       const err = document.getElementById('studentModalError');
-      err.textContent = "Please provide both Student Name and Parent Name.";
+      err.textContent = 'Please provide both Student Name and Parent Name.';
       err.classList.remove('hidden');
       return;
     }
@@ -445,19 +476,29 @@ if (isDashboard) {
       createdAt: new Date().toISOString()
     };
 
-
     const students = await getStudents();
     students.push(newStudent);
     await saveStudents(students);
-    
+
+    // Assign to selected time slot
+    if (slotId) {
+      const sessions = await getSessions();
+      const idx = sessions.findIndex(s => s.id === slotId);
+      if (idx !== -1) {
+        if (!sessions[idx].students) sessions[idx].students = [];
+        const alreadyIn = sessions[idx].students.some(st => st.id === newStudent.id);
+        if (!alreadyIn) {
+          sessions[idx].students.push({ id: newStudent.id, name: newStudent.name, age: newStudent.age });
+          await saveSessions(sessions);
+        }
+      }
+    }
+
     closeStudentModal();
     renderGlobalStudentsList();
-    
-    // If the booking modal is open, refresh its dropdown
-    if (!document.getElementById('bookingModal').classList.contains('hidden')) {
-      populateStudentDropdown('bookingStudentSelect');
-    }
+    renderCalendar();
   };
+
 
   let currentStudentToArchive = null;
 
@@ -600,7 +641,7 @@ if (isDashboard) {
       })).sort((a, b) => a.time.localeCompare(b.time));
 
       const totalEnrolled = typeSessions.reduce((acc, s) => acc + (s.students?.length || 0), 0);
-      const totalSlots = typeSessions.length * 9;
+      const totalSlots = typeSessions.length * 8;
 
       return `
         <div class="class-type-card">
@@ -619,10 +660,10 @@ if (isDashboard) {
                     <div style="margin-bottom: 16px;">
                       <div class="sub" style="margin-bottom: 6px; display:flex; justify-content:space-between; font-weight:500;">
                         <span>${dayName} @ ${formatTime(s.time)}</span>
-                        <span>${enrolled}/9</span>
+                        <span>${enrolled}/8</span>
                       </div>
                       <div class="seating-map">
-                        ${Array.from({ length: 9 }).map((_, i) => `
+                        ${Array.from({ length: 8 }).map((_, i) => `
                           <div class="seat ${i < enrolled ? 'filled ' + type : ''}" title="${i < enrolled ? s.students[i].name : 'Empty'}"></div>
                         `).join('')}
                       </div>
@@ -639,7 +680,7 @@ if (isDashboard) {
 
   function renderSessionCard(s) {
     const enrolled = s.students ? s.students.length : 0;
-    const max = s.maxStudents || 10;
+    const max = s.maxStudents || 8;
     const full = enrolled >= max;
     const endTime = addMinutes(s.time, s.duration);
     const isRecurring = s.isRecurring;
@@ -661,106 +702,171 @@ if (isDashboard) {
   window.openBookingModal = async function () {
     const isTeacher = user.role === 'teacher';
     pendingStudents = [];
-    renderStudentList();
-    populateStudentDropdown('bookingStudentSelect');
-    
-    document.getElementById('bookingError').classList.add('hidden');
-    document.getElementById('studentError').classList.add('hidden');
+    pendingFreeStudents = [];
 
-    // Setup modal based on role
+    document.getElementById('bookingError').classList.add('hidden');
     document.getElementById('bookingTitle').textContent = isTeacher ? 'Schedule Time Slot' : 'Book Free Session';
 
-    
-    // For teachers, we use Day of Week. For others, specific Date.
-    const dateGroup = document.getElementById('dateGroup');
-    if (isTeacher) {
-      dateGroup.innerHTML = `
-        <label>Day of Week</label>
-        <select id="sessionDay">
-          <option value="1">Monday</option>
-          <option value="2">Tuesday</option>
-          <option value="3">Wednesday</option>
-          <option value="4">Thursday</option>
-          <option value="5">Friday</option>
-          <option value="6">Saturday</option>
-          <option value="0">Sunday</option>
-        </select>
-      `;
-    } else {
-      dateGroup.innerHTML = `
-        <label>Date</label>
-        <input type="date" id="sessionDate" />
-      `;
-      document.getElementById('sessionDate').value = dateToStr(new Date());
-    }
-
-    document.getElementById('sessionTime').value = '09:00';
-    document.getElementById('sessionDuration').value = '60';
-    
-    // For teachers, name is pre-set by type
-    if (isTeacher) {
-      document.getElementById('sessionName').value = 'Explorer';
-      document.getElementById('sessionMax').value = '9';
-      document.getElementById('sessionMax').disabled = true;
-    } else {
-      document.getElementById('sessionName').value = '';
-      document.getElementById('sessionMax').value = '10';
-      document.getElementById('sessionNotes').value = '';
-      document.getElementById('sessionMax').disabled = false;
-    }
-
-    // Class Type Selector for Teachers
-    const nameGroup = document.getElementById('sessionName').parentElement;
-    if (isTeacher) {
-      nameGroup.innerHTML = `
-        <label>Class Level</label>
-        <div class="type-selector">
-          <button class="type-btn active" onclick="selectClassType('Explorer', this)">Explorer</button>
-          <button class="type-btn" onclick="selectClassType('Junior', this)">Junior</button>
-          <button class="type-btn" onclick="selectClassType('Intro', this)">Intro</button>
-        </div>
-        <input type="hidden" id="sessionName" value="Explorer" />
-        <input type="hidden" id="classType" value="Explorer" />
-      `;
-    } else {
-      nameGroup.innerHTML = `
-        <label>Session Name / Subject</label>
-        <input type="text" id="sessionName" placeholder="e.g. Beginner Swimming" />
-        <input type="hidden" id="classType" value="Free" />
-      `;
-    }
-
-
-    // Duration options for Front Desk (1h/2h only as requested)
-    const durationSel = document.getElementById('sessionDuration');
-    if (!isTeacher) {
-      durationSel.innerHTML = `
-        <option value="60">1 Hour Session</option>
-        <option value="120">2 Hour Session</option>
-      `;
-    } else {
-      durationSel.innerHTML = `
-        <option value="30">30 Min Class</option>
-        <option value="60">1 Hour Class</option>
-        <option value="90">1.5 Hour Class</option>
-        <option value="120">2 Hour Class</option>
-      `;
-    }
-
-    // Populate teachers
-    const teacherSel = document.getElementById('sessionTeacher');
     const allUsers = await getUsers();
     const teachers = allUsers.filter(u => u.role === 'teacher');
-    teacherSel.innerHTML = '<option value="">— Select teacher —</option>' +
+    const teacherOptions = '<option value="">— Select teacher —</option>' +
       teachers.map(t => `<option value="${t.id}" ${t.id === user.id ? 'selected' : ''}>${t.name}</option>`).join('');
+
+    const body = document.getElementById('bookingModalBody');
+
+    if (isTeacher) {
+      body.innerHTML = `
+        <div class="form-row">
+          <div class="form-group">
+            <label>Day of Week</label>
+            <select id="sessionDay">
+              <option value="1">Monday</option><option value="2">Tuesday</option>
+              <option value="3">Wednesday</option><option value="4">Thursday</option>
+              <option value="5">Friday</option><option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Start Time</label>
+            <input type="time" id="sessionTime" value="09:00" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Duration</label>
+          <select id="sessionDuration">
+            <option value="30">30 Min Class</option>
+            <option value="60" selected>1 Hour Class</option>
+            <option value="90">1.5 Hour Class</option>
+            <option value="120">2 Hour Class</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Class Level</label>
+          <div class="type-selector">
+            <button class="type-btn active" onclick="selectClassType('Explorer', this)">Explorer</button>
+            <button class="type-btn" onclick="selectClassType('Junior', this)">Junior</button>
+            <button class="type-btn" onclick="selectClassType('Intro', this)">Intro</button>
+          </div>
+          <input type="hidden" id="sessionName" value="Explorer" />
+          <input type="hidden" id="classType" value="Explorer" />
+        </div>
+        <div class="form-group">
+          <label>Assign Teacher</label>
+          <select id="sessionTeacher">${teacherOptions}</select>
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea id="sessionNotes" rows="2" placeholder="e.g. Room change this week"></textarea>
+        </div>
+      `;
+    } else {
+      // Front desk / admin free session form
+      body.innerHTML = `
+        <div class="form-row">
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="sessionDate" value="${dateToStr(new Date())}" />
+          </div>
+          <div class="form-group">
+            <label>Start Time</label>
+            <input type="time" id="sessionTime" value="09:00" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Duration (this will be the session name)</label>
+          <select id="sessionDuration">
+            <option value="60">1 Hour Session</option>
+            <option value="120">2 Hour Session</option>
+          </select>
+          <input type="hidden" id="sessionName" value="1 Hour Session" />
+          <input type="hidden" id="classType" value="Free" />
+        </div>
+        <div class="form-group">
+          <label>Assign Teacher</label>
+          <select id="sessionTeacher">${teacherOptions}</select>
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea id="sessionNotes" rows="2" placeholder="e.g. John will be 10 mins late"></textarea>
+        </div>
+        <hr style="border:none; border-top:1px solid var(--border); margin:1rem 0;" />
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
+          <h4 style="font-size:0.9rem;">Students Attending</h4>
+          <button class="btn-ghost small" onclick="addFreeStudent()">+ Add Student</button>
+        </div>
+        <div id="freeStudentList"></div>
+        <p class="sub" style="font-size:0.75rem; margin-top:0.5rem;">Add all students. Students from the same parent can share parent details.</p>
+      `;
+
+      // Sync session name from duration
+      document.getElementById('sessionDuration').addEventListener('change', function() {
+        document.getElementById('sessionName').value = this.options[this.selectedIndex].text;
+      });
+
+      // Add first student row
+      addFreeStudent();
+    }
 
     document.getElementById('bookingModal').classList.remove('hidden');
   };
+
+  // Free session student entries
+  let pendingFreeStudents = [];
+
+  window.addFreeStudent = function() {
+    pendingFreeStudents.push({});
+    renderFreeStudentList();
+  };
+
+  window.removeFreeStudent = function(idx) {
+    pendingFreeStudents.splice(idx, 1);
+    renderFreeStudentList();
+  };
+
+  function renderFreeStudentList() {
+    const container = document.getElementById('freeStudentList');
+    if (!container) return;
+    if (pendingFreeStudents.length === 0) {
+      container.innerHTML = '<p class="sub">No students added yet.</p>';
+      return;
+    }
+    container.innerHTML = pendingFreeStudents.map((_, i) => `
+      <div class="free-student-entry" style="border:1px solid var(--border); border-radius:var(--radius-sm); padding:1rem; margin-bottom:0.8rem; position:relative;">
+        <button class="remove-btn" onclick="removeFreeStudent(${i})" style="position:absolute; top:8px; right:8px;">✕</button>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Student Name</label>
+            <input type="text" id="freeStName_${i}" placeholder="e.g. Liam Smith" />
+          </div>
+          <div class="form-group">
+            <label>Age</label>
+            <input type="number" id="freeStAge_${i}" min="1" max="100" placeholder="e.g. 10" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Parent Name</label>
+            <input type="text" id="freeStParent_${i}" placeholder="e.g. Michael Smith" ${i > 0 ? 'placeholder="Same as above or different"' : ''} />
+          </div>
+          <div class="form-group">
+            <label>Parent Phone</label>
+            <input type="tel" id="freeStPhone_${i}" placeholder="e.g. 082 123 4567" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Parent Email</label>
+          <input type="email" id="freeStEmail_${i}" placeholder="e.g. michael@example.com" />
+        </div>
+      </div>
+    `).join('');
+  }
+
 
 
   window.closeBookingModal = function () {
     document.getElementById('bookingModal').classList.add('hidden');
   };
+
 
   window.selectDuration = function (btn) {
     document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
@@ -823,23 +929,39 @@ if (isDashboard) {
   };
 
   window.removeStudent = function (idx) {
-
     pendingStudents.splice(idx, 1);
     renderStudentList();
   };
+
+  function collectFreeStudents() {
+    const results = [];
+    const entries = document.querySelectorAll('#freeStudentList .free-student-entry');
+    entries.forEach((_, i) => {
+      const name = (document.getElementById(`freeStName_${i}`)?.value || '').trim();
+      if (name) {
+        results.push({
+          id: 'fs_' + Math.random().toString(36).substr(2, 6),
+          name,
+          age: document.getElementById(`freeStAge_${i}`)?.value || '',
+          parentName: document.getElementById(`freeStParent_${i}`)?.value || '',
+          parentPhone: document.getElementById(`freeStPhone_${i}`)?.value || '',
+          parentEmail: document.getElementById(`freeStEmail_${i}`)?.value || ''
+        });
+      }
+    });
+    return results;
+  }
 
   window.saveBooking = async function () {
     const isTeacher = user.role === 'teacher';
     const time = document.getElementById('sessionTime').value;
     const duration = parseInt(document.getElementById('sessionDuration').value);
     const name = document.getElementById('sessionName').value.trim();
-    const maxStudents = parseInt(document.getElementById('sessionMax').value);
     const teacherId = document.getElementById('sessionTeacher').value;
-    const notes = document.getElementById('sessionNotes').value.trim();
+    const notes = (document.getElementById('sessionNotes')?.value || '').trim();
 
     let date = null;
     let dayOfWeek = null;
-
 
     if (isTeacher) {
       dayOfWeek = parseInt(document.getElementById('sessionDay').value);
@@ -869,11 +991,11 @@ if (isDashboard) {
       time,
       duration,
       name,
-      maxStudents: isTeacher ? 9 : maxStudents,
+      maxStudents: isTeacher ? 8 : 8,
       teacherId,
       teacherName,
       notes,
-      students: [...pendingStudents],
+      students: isTeacher ? [...pendingStudents] : collectFreeStudents(),
       createdBy: user.id,
       createdAt: new Date().toISOString()
     };
@@ -1115,7 +1237,7 @@ if (isDashboard) {
       date: finalDate,
       time,
       duration,
-      maxStudents: isTeacher ? 9 : maxStudents,
+      maxStudents: isTeacher ? 8 : maxStudents,
       teacherId,
 
       teacherName,
