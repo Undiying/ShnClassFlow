@@ -4,8 +4,8 @@
 // ============================================================
 
 // ── Supabase Configuration ─────────────────────────────────────
-const SUPABASE_URL = 'https://rnvpgurtthezmzffdlhi.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJudnBndXJ0dGhlem16ZmZkbGhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NTM4NDMsImV4cCI6MjA5NDIyOTg0M30.WUl_SVepT7uQmR0ObDmkQYNN33Gik2_OnW4RE3b6a74';
+const SUPABASE_URL = CONFIG.SUPABASE_URL;
+const SUPABASE_KEY = CONFIG.SUPABASE_KEY;
 const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 if (!sb) {
@@ -266,33 +266,59 @@ if (isLoginPage) {
   };
 
   window.doLogin = async function () {
-    console.log('Login attempt started...');
+    const email = document.getElementById('loginUser').value.trim();
+    const password = document.getElementById('loginPass').value;
+    
+    if (!selectedRole) return;
+
     try {
-      const username = document.getElementById('loginUser').value.trim().toLowerCase();
-      const password = document.getElementById('loginPass').value;
-      
-      if (!selectedRole) {
-        console.error('No role selected');
+      const { data, error } = await sb.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
+
+      if (error) {
+        document.getElementById('loginError').textContent = error.message;
+        document.getElementById('loginError').classList.remove('hidden');
         return;
       }
 
-      console.log(`Fetching users for role: ${selectedRole}...`);
-      const users = await getUsers();
-      console.log('Users fetched:', users.length);
+      // Login successful, now fetch or create the profile
+      let { data: profile } = await sb.from('profiles').select('*').eq('id', data.user.id).single();
 
-      const user = users.find(u => u.username.toLowerCase() === username && u.password === password && u.role === selectedRole);
+      if (!profile) {
+        // Migration/New User: Link by email if profile exists with email as username
+        const { data: oldProfile } = await sb.from('profiles').select('*').eq('username', email.toLowerCase()).single();
+        
+        if (oldProfile) {
+          // Update the ID to match the Auth ID
+          await sb.from('profiles').update({ id: data.user.id }).eq('username', email.toLowerCase());
+          profile = { ...oldProfile, id: data.user.id };
+        } else {
+          // Create new profile for this Auth user
+          const newProfile = {
+            id: data.user.id,
+            name: email.split('@')[0],
+            username: email.toLowerCase(),
+            role: selectedRole
+          };
+          await sb.from('profiles').insert(newProfile);
+          profile = newProfile;
+        }
+      }
 
-      if (user) {
-        console.log('Login successful for:', user.name);
-        setCurrentUser(user);
+      if (profile && (profile.role === selectedRole || user?.role === 'admin')) {
+        setCurrentUser(profile);
         window.location.href = 'dashboard.html';
       } else {
-        console.warn('Login failed: Invalid credentials');
+        document.getElementById('loginError').textContent = 'Account exists but is not assigned the ' + selectedRole + ' role.';
         document.getElementById('loginError').classList.remove('hidden');
+        await sb.auth.signOut();
       }
     } catch (err) {
-      console.error('Login error:', err);
-      alert('An error occurred during login. Please check the console.');
+      console.error('Auth error:', err);
+      document.getElementById('loginError').textContent = 'An unexpected error occurred.';
+      document.getElementById('loginError').classList.remove('hidden');
     }
   };
 
@@ -687,7 +713,8 @@ if (isDashboard) {
 
 
 
-  window.logout = function () {
+  window.logout = async function () {
+    if (sb) await sb.auth.signOut();
     sessionStorage.removeItem('cf_current_user');
     window.location.href = 'index.html';
   };
