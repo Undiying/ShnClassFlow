@@ -348,13 +348,20 @@ if (isDashboard) {
     if (navAdmin) navAdmin.style.display = 'flex';
   }
 
-  // Front desk cannot register students
-  if (user.role === 'frontdesk') {
+  // Front desk and viewer cannot register students
+  if (user.role === 'frontdesk' || user.role === 'viewer') {
     const regBtn = document.getElementById('registerStudentBtn');
     if (regBtn) regBtn.style.display = 'none';
   }
 
-  if (user.role === 'teacher') {
+  if (user.role === 'viewer') {
+    const b1 = document.getElementById('bookBtn');
+    if (b1) b1.style.display = 'none';
+    const b2 = document.getElementById('bookBtn2');
+    if (b2) b2.style.display = 'none';
+    const sub = document.getElementById('viewSub');
+    if (sub) sub.textContent = 'Weekly class schedule (View Only)';
+  } else if (user.role === 'teacher') {
     document.getElementById('bookBtn').textContent = '+ Create Time Slot';
     document.getElementById('bookBtn2').textContent = '+ Create Time Slot';
     document.getElementById('viewSub').textContent = 'Manage your weekly recurring time slots';
@@ -463,6 +470,13 @@ if (isDashboard) {
         .map(e => e.display)
         .join(', ');
 
+      const actionButtons = user.role === 'viewer' ? '' : `
+            <div style="position: absolute; top: 0; right: 0; display: flex; gap: 4px;">
+              <button class="remove-btn" onclick="openEditStudentModal('${s.id}')" title="Edit Student" style="background: var(--surface-3); border: 1px solid var(--border);">✎</button>
+              <button class="remove-btn" onclick="openArchiveModal('${s.id}')" title="Archive Student">✕</button>
+            </div>
+      `;
+
       return `
         <div class="user-row" style="align-items: flex-start; padding: 1.5rem 1.25rem;">
           <div class="user-avatar">${s.name.charAt(0).toUpperCase()}</div>
@@ -479,10 +493,7 @@ if (isDashboard) {
           <div style="flex:3; color: var(--text-2); font-size: 0.8rem; line-height: 1.4; position: relative; padding-right: 60px;">
             <strong style="display:block; margin-bottom: 2px; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Notes</strong>
             ${s.notes || 'No notes'}
-            <div style="position: absolute; top: 0; right: 0; display: flex; gap: 4px;">
-              <button class="remove-btn" onclick="openEditStudentModal('${s.id}')" title="Edit Student" style="background: var(--surface-3); border: 1px solid var(--border);">✎</button>
-              <button class="remove-btn" onclick="openArchiveModal('${s.id}')" title="Archive Student">✕</button>
-            </div>
+            ${actionButtons}
           </div>
         </div>
       `;
@@ -1708,4 +1719,30 @@ if (isDashboard) {
 
   renderLatestMessage();
   renderCalendar();
+
+  // Subscribe to Postgres changes on 'messages' table for real-time updates
+  if (sb && !SUPABASE_URL.includes('YOUR')) {
+    sb.channel('realtime_messages')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        () => {
+          renderLatestMessage();
+          const modal = document.getElementById('messageModal');
+          if (modal && !modal.classList.contains('hidden')) {
+            renderMessages();
+          }
+        }
+      )
+      .subscribe();
+  }
+
+  // Polling fallback to keep message board perfectly in sync every 8 seconds
+  setInterval(() => {
+    renderLatestMessage();
+    const modal = document.getElementById('messageModal');
+    if (modal && !modal.classList.contains('hidden')) {
+      renderMessages();
+    }
+  }, 8000);
 }
