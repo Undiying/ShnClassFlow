@@ -919,6 +919,7 @@ if (isDashboard) {
             <button class="type-btn active" onclick="selectClassType('Explorer', this)">Explorer</button>
             <button class="type-btn" onclick="selectClassType('Junior', this)">Junior</button>
             <button class="type-btn" onclick="selectClassType('Intro', this)">Intro</button>
+            <button class="type-btn" onclick="selectClassType('Event', this)">Event</button>
           </div>
           <input type="hidden" id="sessionName" value="Explorer" />
           <input type="hidden" id="classType" value="Explorer" />
@@ -1215,6 +1216,19 @@ if (isDashboard) {
 
     const canManage = user.role === 'admin' || user.role === 'frontdesk' || user.role === 'teacher';
 
+    const isEvent = s.classType === 'Event';
+    const capacityHTML = isEvent ? `
+        <div class="detail-item">
+          <span class="detail-label">👥 Capacity</span>
+          <span>Event (No Students)</span>
+        </div>
+    ` : `
+        <div class="detail-item">
+          <span class="detail-label">👥 Capacity</span>
+          <span>${enrolled} / ${s.maxStudents} students</span>
+        </div>
+    `;
+
     document.getElementById('detailBody').innerHTML = `
       <div class="detail-grid">
         <div class="detail-item">
@@ -1229,10 +1243,7 @@ if (isDashboard) {
           <span class="detail-label">👤 Teacher</span>
           <span>${s.teacherName || 'Not assigned'}</span>
         </div>
-        <div class="detail-item">
-          <span class="detail-label">👥 Capacity</span>
-          <span>${enrolled} / ${s.maxStudents} students</span>
-        </div>
+        ${capacityHTML}
       </div>
       ${s.notes ? `
         <div class="detail-notes">
@@ -1240,8 +1251,8 @@ if (isDashboard) {
           <p>${s.notes}</p>
         </div>
       ` : ''}
+      ${isEvent ? '' : `
       <div class="detail-students">
-
         <h4>Students (${enrolled})</h4>
         ${enrolled === 0
           ? '<p class="sub">No students registered.</p>'
@@ -1257,6 +1268,7 @@ if (isDashboard) {
             </div>`
         }
       </div>
+      `}
     `;
 
     // Reset footer buttons
@@ -1288,7 +1300,7 @@ if (isDashboard) {
     ).join('');
 
     const isTeacher = user.role === 'teacher';
-    const types = ['Explorer', 'Junior', 'Intro'];
+    const types = ['Explorer', 'Junior', 'Intro', 'Event'];
     const typeOptions = isTeacher ? `
       <div class="form-group">
         <label>Class Level</label>
@@ -1324,10 +1336,12 @@ if (isDashboard) {
             <option value="120" ${s.duration === 120 ? 'selected' : ''}>2 Hours</option>
           </select>
         </div>
+        ${s.classType === 'Event' ? '' : `
         <div class="form-group">
           <label>Max Students</label>
           <input type="number" id="editMax" value="${s.maxStudents}" min="1" max="50" />
         </div>
+        `}
         <div class="form-group">
           <label>Teacher</label>
           <select id="editTeacher">
@@ -1342,8 +1356,7 @@ if (isDashboard) {
         </div>
         
         <!-- Students Section in Edit -->
-
-        <div class="form-group">
+        ${s.classType === 'Event' ? '' : `
         <div class="form-group">
           <label>Assign Registered Student</label>
           <div id="editStudentList" class="student-list"></div>
@@ -1354,14 +1367,17 @@ if (isDashboard) {
             <button class="btn-ghost small" onclick="addStudentEdit()">+ Add</button>
           </div>
         </div>
+        `}
 
 
         <div id="editError" class="error-msg hidden"></div>
       </div>
     `;
 
-    renderStudentListEdit();
-    populateStudentDropdown('editStudentSelect');
+    if (s.classType !== 'Event') {
+      renderStudentListEdit();
+      populateStudentDropdown('editStudentSelect');
+    }
 
 
     // Swap footer buttons
@@ -1377,7 +1393,8 @@ if (isDashboard) {
     const date = document.getElementById('editDate').value;
     const time = document.getElementById('editTime').value;
     const duration = parseInt(document.getElementById('editDuration').value);
-    const maxStudents = parseInt(document.getElementById('editMax').value);
+    const maxStudentsEl = document.getElementById('editMax');
+    const maxStudents = maxStudentsEl ? parseInt(maxStudentsEl.value) : 8;
     const teacherId = document.getElementById('editTeacher').value;
     const notes = document.getElementById('editNotes').value.trim();
 
@@ -1401,12 +1418,14 @@ if (isDashboard) {
 
     const isTeacher = user.role === 'teacher';
     const finalDate = (isTeacher || !date) ? null : date;
+    const finalClassType = document.getElementById('editClassType')?.value || sessions[idx].classType;
+    const isEvent = finalClassType === 'Event';
 
     // Update session
     sessions[idx] = {
       ...sessions[idx],
       name,
-      classType: document.getElementById('editClassType')?.value || sessions[idx].classType,
+      classType: finalClassType,
       date: finalDate,
       time,
       duration,
@@ -1415,7 +1434,7 @@ if (isDashboard) {
 
       teacherName,
       notes,
-      students: [...pendingStudents]
+      students: isEvent ? [] : [...pendingStudents]
     };
 
 
@@ -1588,7 +1607,105 @@ if (isDashboard) {
     renderAdminPanel();
   };
 
+  // ── Message Board ──────────────────────────────────────────
+  async function getMessages() {
+    if (!sb || SUPABASE_URL.includes('YOUR')) {
+      const raw = localStorage.getItem('cf_messages');
+      return raw ? JSON.parse(raw) : [];
+    }
+    const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: false });
+    if (error) {
+      console.error('Error fetching messages:', error);
+      return [];
+    }
+    return data || [];
+  }
+
+  async function saveMessage(content) {
+    const newMessage = {
+      content,
+      author_name: user ? user.name : 'Unknown User',
+      created_at: new Date().toISOString()
+    };
+    if (!sb || SUPABASE_URL.includes('YOUR')) {
+      const raw = localStorage.getItem('cf_messages');
+      const msgs = raw ? JSON.parse(raw) : [];
+      msgs.unshift(newMessage);
+      localStorage.setItem('cf_messages', JSON.stringify(msgs));
+      return;
+    }
+    const { error } = await sb.from('messages').insert([newMessage]);
+    if (error) {
+      console.error('Error saving message:', error);
+    }
+  }
+
+  window.openMessageModal = async function() {
+    document.getElementById('messageModal').classList.remove('hidden');
+    await renderMessages();
+  };
+
+  window.closeMessageModal = function() {
+    document.getElementById('messageModal').classList.add('hidden');
+  };
+
+  async function renderMessages() {
+    const messages = await getMessages();
+    const listEl = document.getElementById('messageList');
+    if (!listEl) return;
+
+    listEl.innerHTML = messages.map(msg => {
+      const isOwn = user && msg.author_name === user.name;
+      const timeStr = new Date(msg.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+      const dateStr = new Date(msg.created_at).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' });
+      return `
+        <div class="message-bubble ${isOwn ? 'own' : ''}">
+          <div class="message-meta">
+            <span>${msg.author_name}</span>
+            <span>${dateStr} @ ${timeStr}</span>
+          </div>
+          <div class="message-body">${msg.content}</div>
+        </div>
+      `;
+    }).join('');
+    listEl.scrollTop = listEl.scrollHeight;
+  }
+
+  window.postNewMessage = async function() {
+    const textEl = document.getElementById('newMessageText');
+    if (!textEl) return;
+    const content = textEl.value.trim();
+    if (!content) return;
+
+    await saveMessage(content);
+    textEl.value = '';
+    await renderMessages();
+    await renderLatestMessage();
+  };
+
+  async function renderLatestMessage() {
+    const messages = await getMessages();
+    const authorEl = document.getElementById('latestMsgAuthor');
+    const textEl = document.getElementById('latestMsgText');
+    const timeEl = document.getElementById('latestMsgTime');
+
+    if (!authorEl || !textEl || !timeEl) return;
+
+    if (messages.length > 0) {
+      const latest = messages[0];
+      authorEl.textContent = latest.author_name;
+      textEl.textContent = latest.content;
+      const dateObj = new Date(latest.created_at);
+      timeEl.textContent = dateObj.toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' }) + ' ' + dateObj.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+    } else {
+      authorEl.textContent = 'System';
+      textEl.textContent = 'No messages posted yet. Be the first!';
+      timeEl.textContent = '';
+    }
+  }
+
   // ── Init ──────────────────────────────────────────────────
 
+  renderLatestMessage();
   renderCalendar();
 }
