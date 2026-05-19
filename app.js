@@ -1568,7 +1568,7 @@ if (isDashboard) {
         <div class="user-avatar">${u.name.charAt(0)}</div>
         <div>
           <div class="user-name">${u.name}</div>
-          <div class="user-meta">@${u.username} · ${u.role === 'teacher' ? '📚 Teacher' : '🗓️ Front Desk'}</div>
+          <div class="user-meta">@${u.username} · ${u.role === 'teacher' ? '📚 Teacher' : u.role === 'viewer' ? '👁️ Viewer' : '🗓️ Front Desk'}</div>
         </div>
         <button class="remove-btn" onclick="deleteUser('${u.id}')">✕</button>
       </div>
@@ -1589,6 +1589,13 @@ if (isDashboard) {
       return;
     }
 
+    if (password.length < 6) {
+      msgEl.textContent = 'Password must be at least 6 characters.';
+      msgEl.className = 'error-msg';
+      msgEl.classList.remove('hidden');
+      return;
+    }
+
     const users = await getUsers();
     if (users.find(u => u.username.toLowerCase() === username)) {
       msgEl.textContent = 'Username already taken.';
@@ -1597,8 +1604,68 @@ if (isDashboard) {
       return;
     }
 
-    users.push({ id: uid(), name, username, password, role });
-    await saveUsers(users);
+    // Create Supabase Auth account + profile in one step
+    if (sb && !SUPABASE_URL.includes('YOUR')) {
+      msgEl.textContent = 'Creating account...';
+      msgEl.className = 'success-msg';
+      msgEl.classList.remove('hidden');
+
+      try {
+        // 1. Sign up in Supabase Auth (email = username)
+        const { data: authData, error: authError } = await sb.auth.signUp({
+          email: username,
+          password: password,
+          options: { data: { display_name: name } }
+        });
+
+        if (authError) {
+          msgEl.textContent = 'Auth error: ' + authError.message;
+          msgEl.className = 'error-msg';
+          return;
+        }
+
+        const authUserId = authData.user?.id;
+        if (!authUserId) {
+          msgEl.textContent = 'Error: Could not get user ID from auth.';
+          msgEl.className = 'error-msg';
+          return;
+        }
+
+        // 2. Insert profile with the Auth UUID
+        const { error: profileError } = await sb.from('profiles').insert({
+          id: authUserId,
+          name: name,
+          username: username,
+          role: role
+        });
+
+        if (profileError) {
+          console.error('Profile insert error:', profileError);
+          msgEl.textContent = 'Auth account created but profile error: ' + profileError.message;
+          msgEl.className = 'error-msg';
+          return;
+        }
+
+        // 3. Re-authenticate as admin (signUp may have switched the session)
+        const currentUser = getCurrentUser();
+        if (currentUser && currentUser.username) {
+          await sb.auth.signInWithPassword({
+            email: currentUser.username,
+            password: 'sheen'
+          });
+        }
+
+      } catch (err) {
+        console.error('createUser error:', err);
+        msgEl.textContent = 'Unexpected error: ' + err.message;
+        msgEl.className = 'error-msg';
+        return;
+      }
+    } else {
+      // Fallback for localStorage mode
+      users.push({ id: uid(), name, username, password, role });
+      await saveUsers(users);
+    }
 
     msgEl.textContent = `✓ Account created for ${name}`;
     msgEl.className = 'success-msg';
@@ -1609,7 +1676,7 @@ if (isDashboard) {
     document.getElementById('newUserPass').value = '';
 
     renderAdminPanel();
-    setTimeout(() => msgEl.classList.add('hidden'), 3000);
+    setTimeout(() => msgEl.classList.add('hidden'), 5000);
   };
 
   window.deleteUser = async function (id) {
