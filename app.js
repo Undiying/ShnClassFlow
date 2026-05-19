@@ -892,40 +892,17 @@ if (isDashboard) {
     document.getElementById('bookingTitle').textContent = isTeacher ? 'Schedule Time Slot' : 'Book Free Session';
 
     const allUsers = await getUsers();
-    const teachers = allUsers.filter(u => u.role === 'teacher');
+    // Include admins and teachers in the teacher/assignee dropdown
+    const assignable = allUsers.filter(u => u.role === 'teacher' || u.role === 'admin');
     const teacherOptions = '<option value="">— Select teacher —</option>' +
-      teachers.map(t => `<option value="${t.id}" ${t.id === user.id ? 'selected' : ''}>${t.name}</option>`).join('');
+      assignable.map(t => `<option value="${t.id}" ${t.id === user.id ? 'selected' : ''}>${t.name}</option>`).join('');
 
     const body = document.getElementById('bookingModalBody');
 
     if (isTeacher) {
       body.innerHTML = `
-        <div class="form-row">
-          <div class="form-group">
-            <label>Day of Week</label>
-            <select id="sessionDay">
-              <option value="1">Monday</option><option value="2">Tuesday</option>
-              <option value="3">Wednesday</option><option value="4">Thursday</option>
-              <option value="5">Friday</option><option value="6">Saturday</option>
-              <option value="0">Sunday</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Start Time</label>
-            <input type="time" id="sessionTime" value="09:00" />
-          </div>
-        </div>
         <div class="form-group">
-          <label>Duration</label>
-          <select id="sessionDuration">
-            <option value="30">30 Min Class</option>
-            <option value="60" selected>1 Hour Class</option>
-            <option value="90">1.5 Hour Class</option>
-            <option value="120">2 Hour Class</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Class Level</label>
+          <label>Session Type</label>
           <div class="type-selector">
             <button class="type-btn active" onclick="selectClassType('Explorer', this)">Explorer</button>
             <button class="type-btn" onclick="selectClassType('Junior', this)">Junior</button>
@@ -934,6 +911,67 @@ if (isDashboard) {
           </div>
           <input type="hidden" id="sessionName" value="Explorer" />
           <input type="hidden" id="classType" value="Explorer" />
+        </div>
+        <div id="eventRecurringToggle" style="display:none">
+          <div class="form-group">
+            <label>Frequency</label>
+            <div class="type-selector">
+              <button class="type-btn active" onclick="selectEventFrequency('recurring', this)">Recurring (Weekly)</button>
+              <button class="type-btn" onclick="selectEventFrequency('once', this)">One-Off</button>
+            </div>
+            <input type="hidden" id="eventFrequency" value="recurring" />
+          </div>
+        </div>
+        <div id="scheduleDayRow">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Day of Week</label>
+              <select id="sessionDay">
+                <option value="1">Monday</option><option value="2">Tuesday</option>
+                <option value="3">Wednesday</option><option value="4">Thursday</option>
+                <option value="5">Friday</option><option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Start Time</label>
+              <input type="time" id="sessionTime" value="09:00" />
+            </div>
+          </div>
+        </div>
+        <div id="scheduleDateRow" style="display:none">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Date</label>
+              <input type="date" id="sessionDate" value="${dateToStr(new Date())}" />
+            </div>
+            <div class="form-group">
+              <label>Start Time</label>
+              <input type="time" id="sessionTimeAlt" value="09:00" />
+            </div>
+          </div>
+        </div>
+        <div id="durationStandard">
+          <div class="form-group">
+            <label>Duration</label>
+            <select id="sessionDuration">
+              <option value="30">30 Min Class</option>
+              <option value="60" selected>1 Hour Class</option>
+              <option value="90">1.5 Hour Class</option>
+              <option value="120">2 Hour Class</option>
+            </select>
+          </div>
+        </div>
+        <div id="durationFlexible" style="display:none">
+          <div class="form-group">
+            <label>Duration (minutes)</label>
+            <input type="number" id="sessionDurationCustom" value="60" min="15" max="480" step="15" />
+            <p class="sub" style="font-size:0.7rem; margin-top:4px;">Enter any duration in minutes (e.g. 45, 90, 180)</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Event Name / Description</label>
+          <input type="text" id="eventDescription" placeholder="e.g. Staff Training, Parent Meeting" style="display:none" />
         </div>
         <div class="form-group">
           <label>Assign Teacher</label>
@@ -945,26 +983,77 @@ if (isDashboard) {
         </div>
       `;
     } else {
-      // Front desk / admin free session form
+      // Front desk / admin booking form — now also supports Events
       body.innerHTML = `
-        <div class="form-row">
-          <div class="form-group">
-            <label>Date</label>
-            <input type="date" id="sessionDate" value="${dateToStr(new Date())}" />
+        <div class="form-group">
+          <label>Session Type</label>
+          <div class="type-selector">
+            <button class="type-btn active" onclick="selectAdminClassType('Free', this)">Free Session</button>
+            <button class="type-btn" onclick="selectAdminClassType('Event', this)">Event</button>
           </div>
+          <input type="hidden" id="classType" value="Free" />
+        </div>
+        <div id="eventRecurringToggle" style="display:none">
           <div class="form-group">
-            <label>Start Time</label>
-            <input type="time" id="sessionTime" value="09:00" />
+            <label>Frequency</label>
+            <div class="type-selector">
+              <button class="type-btn active" onclick="selectEventFrequency('once', this)">One-Off</button>
+              <button class="type-btn" onclick="selectEventFrequency('recurring', this)">Recurring (Weekly)</button>
+            </div>
+            <input type="hidden" id="eventFrequency" value="once" />
           </div>
         </div>
-        <div class="form-group">
-          <label>Duration (this will be the session name)</label>
-          <select id="sessionDuration">
-            <option value="60">1 Hour Session</option>
-            <option value="120">2 Hour Session</option>
-          </select>
-          <input type="hidden" id="sessionName" value="1 Hour Session" />
-          <input type="hidden" id="classType" value="Free" />
+        <div id="scheduleDateRow">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Date</label>
+              <input type="date" id="sessionDate" value="${dateToStr(new Date())}" />
+            </div>
+            <div class="form-group">
+              <label>Start Time</label>
+              <input type="time" id="sessionTime" value="09:00" />
+            </div>
+          </div>
+        </div>
+        <div id="scheduleDayRow" style="display:none">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Day of Week</label>
+              <select id="sessionDay">
+                <option value="1">Monday</option><option value="2">Tuesday</option>
+                <option value="3">Wednesday</option><option value="4">Thursday</option>
+                <option value="5">Friday</option><option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Start Time</label>
+              <input type="time" id="sessionTimeAlt" value="09:00" />
+            </div>
+          </div>
+        </div>
+        <div id="durationStandard">
+          <div class="form-group">
+            <label>Duration</label>
+            <select id="sessionDuration">
+              <option value="60">1 Hour Session</option>
+              <option value="120">2 Hour Session</option>
+            </select>
+            <input type="hidden" id="sessionName" value="1 Hour Session" />
+          </div>
+        </div>
+        <div id="durationFlexible" style="display:none">
+          <div class="form-group">
+            <label>Duration (minutes)</label>
+            <input type="number" id="sessionDurationCustom" value="60" min="15" max="480" step="15" />
+            <p class="sub" style="font-size:0.7rem; margin-top:4px;">Enter any duration in minutes (e.g. 45, 90, 180)</p>
+          </div>
+        </div>
+        <div id="eventDescriptionGroup" style="display:none">
+          <div class="form-group">
+            <label>Event Name / Description</label>
+            <input type="text" id="eventDescription" placeholder="e.g. Staff Training, Parent Meeting" />
+          </div>
         </div>
         <div class="form-group">
           <label>Assign Teacher</label>
@@ -974,13 +1063,15 @@ if (isDashboard) {
           <label>Notes</label>
           <textarea id="sessionNotes" rows="2" placeholder="e.g. John will be 10 mins late"></textarea>
         </div>
-        <hr style="border:none; border-top:1px solid var(--border); margin:1rem 0;" />
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
-          <h4 style="font-size:0.9rem;">Students Attending</h4>
-          <button class="btn-ghost small" onclick="addFreeStudent()">+ Add Student</button>
+        <div id="freeSessionStudents">
+          <hr style="border:none; border-top:1px solid var(--border); margin:1rem 0;" />
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
+            <h4 style="font-size:0.9rem;">Students Attending</h4>
+            <button class="btn-ghost small" onclick="addFreeStudent()">+ Add Student</button>
+          </div>
+          <div id="freeStudentList"></div>
+          <p class="sub" style="font-size:0.75rem; margin-top:0.5rem;">Add all students. Students from the same parent can share parent details.</p>
         </div>
-        <div id="freeStudentList"></div>
-        <p class="sub" style="font-size:0.75rem; margin-top:0.5rem;">Add all students. Students from the same parent can share parent details.</p>
       `;
 
       // Sync session name from duration
@@ -1111,6 +1202,63 @@ if (isDashboard) {
     btn.classList.add('active');
     document.getElementById('sessionName').value = type;
     document.getElementById('classType').value = type;
+
+    const isEvent = type === 'Event';
+    // Toggle Event-specific fields
+    const evtToggle = document.getElementById('eventRecurringToggle');
+    if (evtToggle) evtToggle.style.display = isEvent ? '' : 'none';
+    const durStd = document.getElementById('durationStandard');
+    if (durStd) durStd.style.display = isEvent ? 'none' : '';
+    const durFlex = document.getElementById('durationFlexible');
+    if (durFlex) durFlex.style.display = isEvent ? '' : 'none';
+    const evtDesc = document.getElementById('eventDescription');
+    if (evtDesc) evtDesc.style.display = isEvent ? '' : 'none';
+
+    // If switching to Event, reset frequency to recurring (teacher default)
+    if (isEvent) {
+      const freqEl = document.getElementById('eventFrequency');
+      if (freqEl) freqEl.value = 'recurring';
+    }
+  };
+
+  window.selectAdminClassType = function (type, btn) {
+    document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('classType').value = type;
+
+    const isEvent = type === 'Event';
+    const evtToggle = document.getElementById('eventRecurringToggle');
+    if (evtToggle) evtToggle.style.display = isEvent ? '' : 'none';
+    const durStd = document.getElementById('durationStandard');
+    if (durStd) durStd.style.display = isEvent ? 'none' : '';
+    const durFlex = document.getElementById('durationFlexible');
+    if (durFlex) durFlex.style.display = isEvent ? '' : 'none';
+    const evtDescGrp = document.getElementById('eventDescriptionGroup');
+    if (evtDescGrp) evtDescGrp.style.display = isEvent ? '' : 'none';
+    const freeStudents = document.getElementById('freeSessionStudents');
+    if (freeStudents) freeStudents.style.display = isEvent ? 'none' : '';
+
+    // If switching back from Event to Free, ensure date row shows
+    if (!isEvent) {
+      const dateRow = document.getElementById('scheduleDateRow');
+      if (dateRow) dateRow.style.display = '';
+      const dayRow = document.getElementById('scheduleDayRow');
+      if (dayRow) dayRow.style.display = 'none';
+    }
+  };
+
+  window.selectEventFrequency = function (freq, btn) {
+    const parent = btn.closest('.type-selector');
+    parent.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const freqEl = document.getElementById('eventFrequency');
+    if (freqEl) freqEl.value = freq;
+
+    const isRecurring = freq === 'recurring';
+    const dayRow = document.getElementById('scheduleDayRow');
+    const dateRow = document.getElementById('scheduleDateRow');
+    if (dayRow) dayRow.style.display = isRecurring ? '' : 'none';
+    if (dateRow) dateRow.style.display = isRecurring ? 'none' : '';
   };
 
   window.removeStudent = function (idx) {
@@ -1139,24 +1287,67 @@ if (isDashboard) {
 
   window.saveBooking = async function () {
     const isTeacher = user.role === 'teacher';
-    const time = document.getElementById('sessionTime').value;
-    const duration = parseInt(document.getElementById('sessionDuration').value);
-    const name = document.getElementById('sessionName').value.trim();
+    const classType = document.getElementById('classType').value;
+    const isEvent = classType === 'Event';
     const teacherId = document.getElementById('sessionTeacher').value;
     const notes = (document.getElementById('sessionNotes')?.value || '').trim();
+    const errEl = document.getElementById('bookingError');
+
+    // Determine frequency: for Events check the toggle; for teachers default recurring; for admin/frontdesk default one-off
+    const freqEl = document.getElementById('eventFrequency');
+    let isRecurring;
+    if (isEvent && freqEl) {
+      isRecurring = freqEl.value === 'recurring';
+    } else {
+      isRecurring = isTeacher;
+    }
+
+    // Get time from whichever row is visible
+    let time = document.getElementById('sessionTime')?.value || '';
+    const timeAlt = document.getElementById('sessionTimeAlt')?.value || '';
+    if (!time && timeAlt) time = timeAlt;
+    // If recurring shows dayRow with sessionTimeAlt visible, prefer it if primary is hidden
+    if (isRecurring && document.getElementById('scheduleDayRow')?.style.display !== 'none') {
+      // sessionTime is in dayRow for teacher, sessionTimeAlt in dateRow
+      const dayRowTime = document.getElementById('sessionTime')?.value;
+      if (dayRowTime) time = dayRowTime;
+    }
+    if (!isRecurring && document.getElementById('scheduleDateRow')?.style.display !== 'none') {
+      const dateRowTime = document.getElementById('sessionTime')?.value || document.getElementById('sessionTimeAlt')?.value;
+      if (dateRowTime) time = dateRowTime;
+    }
+
+    // Duration: flexible for events, standard otherwise
+    let duration;
+    if (isEvent) {
+      const customDur = document.getElementById('sessionDurationCustom');
+      duration = customDur ? parseInt(customDur.value) : 60;
+    } else {
+      duration = parseInt(document.getElementById('sessionDuration').value);
+    }
+
+    // Name: for events use description, for teacher classes use classType, for free sessions use duration label
+    let name;
+    if (isEvent) {
+      const evtDesc = document.getElementById('eventDescription');
+      name = evtDesc ? evtDesc.value.trim() : 'Event';
+      if (!name) name = 'Event';
+    } else {
+      name = document.getElementById('sessionName').value.trim();
+    }
 
     let date = null;
     let dayOfWeek = null;
 
-    if (isTeacher) {
-      dayOfWeek = parseInt(document.getElementById('sessionDay').value);
+    if (isRecurring) {
+      const dayEl = document.getElementById('sessionDay');
+      dayOfWeek = dayEl ? parseInt(dayEl.value) : 1;
     } else {
-      date = document.getElementById('sessionDate').value;
+      const dateEl = document.getElementById('sessionDate');
+      date = dateEl ? dateEl.value : null;
     }
 
-    const errEl = document.getElementById('bookingError');
-
-    if ((!isTeacher && !date) || !time || !name) {
+    if ((!isRecurring && !date) || !time || !name) {
       errEl.textContent = 'Please fill in all required fields.';
       errEl.classList.remove('hidden');
       return;
@@ -1169,28 +1360,26 @@ if (isDashboard) {
 
     const session = {
       id: uid(),
-      classType: document.getElementById('classType').value,
-      isRecurring: isTeacher,
-      dayOfWeek: dayOfWeek,
-      date: date,
+      classType,
+      isRecurring,
+      dayOfWeek,
+      date,
       time,
       duration,
       name,
-      maxStudents: isTeacher ? 8 : 8,
+      maxStudents: isEvent ? 0 : 8,
       teacherId,
       teacherName,
       notes,
-      students: isTeacher ? [...pendingStudents] : collectFreeStudents(),
+      students: isEvent ? [] : (isTeacher ? [...pendingStudents] : collectFreeStudents()),
       createdBy: user.id,
       createdAt: new Date().toISOString()
     };
 
-
-
     const sessions = await getSessions();
     
-    // Duplicate check for Teachers (Recurring slots)
-    if (isTeacher) {
+    // Duplicate check for recurring slots
+    if (isRecurring) {
       const exists = sessions.find(s => 
         s.isRecurring && 
         s.classType === session.classType && 
@@ -1305,8 +1494,8 @@ if (isDashboard) {
     pendingStudents = [...(s.students || [])];
 
     const allUsers = await getUsers();
-    const teachers = allUsers.filter(u => u.role === 'teacher');
-    const teacherOptions = teachers.map(t => 
+    const assignable = allUsers.filter(u => u.role === 'teacher' || u.role === 'admin');
+    const teacherOptions = assignable.map(t => 
       `<option value="${t.id}" ${t.id === s.teacherId ? 'selected' : ''}>${t.name}</option>`
     ).join('');
 
