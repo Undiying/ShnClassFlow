@@ -526,6 +526,24 @@ html, body {
 
 /* ── SESSION CARD ────────────────────────────────────────────── */
 
+.calendar-grid.month-view .cal-day {
+  min-height: 140px;
+}
+.calendar-grid.month-view .cal-day-header {
+  padding: 6px 8px 4px;
+}
+.calendar-grid.month-view .cal-sessions {
+  padding: 4px;
+  gap: 4px;
+}
+.calendar-grid.month-view .session-card {
+  padding: 6px 8px;
+}
+.calendar-grid.month-view .session-time {
+  font-size: 0.7rem;
+  margin-top: 4px;
+}
+
 .session-card {
   background: var(--session-bg);
   border: 1px solid var(--border);

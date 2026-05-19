@@ -65,11 +65,15 @@
           <h1 id="weekLabel">Week</h1>
           <p class="view-sub" id="viewSub">Weekly class schedule</p>
         </div>
-        <div class="header-actions">
-          <button class="btn-ghost" onclick="shiftWeek(-1)">← Prev</button>
-          <button class="btn-ghost" onclick="shiftWeek(0)">Today</button>
-          <button class="btn-ghost" onclick="shiftWeek(1)">Next →</button>
-          <button class="btn-primary" onclick="openBookingModal()" id="bookBtn">+ Book Session</button>
+        <div class="header-actions" style="display:flex; align-items:center; gap:0.5rem;">
+          <div class="day-selector" style="margin-right: 0.5rem; display: flex; overflow: hidden; border-radius: var(--radius); border: 1px solid var(--border);">
+            <button class="day-btn active" id="viewWeekBtn" onclick="setCalendarView('week')" style="border-radius:0; border:none;">Week</button>
+            <button class="day-btn" id="viewMonthBtn" onclick="setCalendarView('month')" style="border-radius:0; border:none; border-left: 1px solid var(--border);">Month</button>
+          </div>
+          <button class="btn-ghost" onclick="shiftCalendar(-1)">← Prev</button>
+          <button class="btn-ghost" onclick="shiftCalendar(0)">Today</button>
+          <button class="btn-ghost" onclick="shiftCalendar(1)">Next →</button>
+          <button class="btn-primary" onclick="openBookingModal()" id="bookBtn" style="margin-left: 0.5rem;">+ Book Session</button>
         </div>
       </div>
 

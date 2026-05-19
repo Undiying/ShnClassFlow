@@ -732,11 +732,40 @@ if (isDashboard) {
 
   // ── Calendar ──────────────────────────────────────────────
 
-  window.shiftWeek = function (dir) {
+  let currentCalendarView = 'week';
+
+  window.setCalendarView = function(view) {
+    currentCalendarView = view;
+    document.getElementById('viewWeekBtn').classList.toggle('active', view === 'week');
+    document.getElementById('viewMonthBtn').classList.toggle('active', view === 'month');
+    
+    // Switch main label
+    const sub = document.getElementById('viewSub');
+    if (user.role === 'viewer') {
+      sub.textContent = view === 'week' ? 'Weekly class schedule (View Only)' : 'Monthly class schedule (View Only)';
+    } else if (user.role === 'teacher') {
+      sub.textContent = view === 'week' ? 'Manage your weekly recurring time slots' : 'Manage your monthly schedule';
+    } else {
+      sub.textContent = view === 'week' ? 'Weekly class schedule' : 'Monthly class schedule';
+    }
+
+    renderCalendar();
+  };
+
+  window.shiftCalendar = function (dir) {
     if (dir === 0) {
       currentWeekMonday = getMondayOf(new Date());
     } else {
-      currentWeekMonday.setDate(currentWeekMonday.getDate() + dir * 7);
+      if (currentCalendarView === 'week') {
+        currentWeekMonday.setDate(currentWeekMonday.getDate() + dir * 7);
+      } else {
+        // Shift by actual calendar month, snapping back to Monday
+        let targetMonth = new Date(currentWeekMonday);
+        targetMonth.setDate(targetMonth.getDate() + 15); // Move into middle of current view
+        targetMonth.setMonth(targetMonth.getMonth() + dir);
+        targetMonth.setDate(1); // First day of that new month
+        currentWeekMonday = getMondayOf(targetMonth);
+      }
     }
     renderCalendar();
   };
@@ -744,24 +773,32 @@ if (isDashboard) {
   function renderCalendar() {
     getSessions().then(sessions => {
       const grid = document.getElementById('calendarGrid');
-      // Build 7 days
+      grid.className = `calendar-grid ${currentCalendarView === 'month' ? 'month-view' : ''}`;
+      
+      const daysToRender = currentCalendarView === 'week' ? 7 : 35; // 5 weeks covers most months
+
+      // Build days
       const days = [];
-      for (let i = 0; i < 7; i++) {
+      for (let i = 0; i < daysToRender; i++) {
         const d = new Date(currentWeekMonday);
         d.setDate(d.getDate() + i);
         days.push(d);
       }
 
       const startStr = dateToStr(days[0]);
-      const endStr = dateToStr(days[6]);
-      document.getElementById('weekLabel').textContent =
-        `${formatDate(startStr)} — ${formatDate(endStr)}`;
+      const endStr = dateToStr(days[days.length - 1]);
+      
+      if (currentCalendarView === 'week') {
+        document.getElementById('weekLabel').textContent = `${formatDate(startStr)} — ${formatDate(endStr)}`;
+      } else {
+        // For month view, label is the Month and Year of the middle date
+        const midDate = days[Math.floor(days.length / 2)];
+        document.getElementById('weekLabel').textContent = midDate.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+      }
 
-      // Filter sessions for this week
-      const weekSessions = sessions.filter(s => {
-        if (s.isRecurring) {
-          return true; // Recurring shows every week
-        }
+      // Filter sessions for this visible range
+      const visibleSessions = sessions.filter(s => {
+        if (s.isRecurring) return true; // Recurring shows every week
         return s.date >= startStr && s.date <= endStr;
       });
 
@@ -769,7 +806,7 @@ if (isDashboard) {
 
       grid.innerHTML = days.map((d, i) => {
         const ds = dateToStr(d);
-        const daySessions = groupSessions(weekSessions
+        const daySessions = groupSessions(visibleSessions
           .filter(s => {
             if (s.isRecurring) {
               return parseInt(s.dayOfWeek) === d.getDay();
@@ -777,7 +814,6 @@ if (isDashboard) {
             return s.date === ds;
           }))
           .sort((a, b) => a.time.localeCompare(b.time));
-
 
         const isToday = ds === today;
         const isPast = ds < today;
