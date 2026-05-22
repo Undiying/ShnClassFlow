@@ -1957,6 +1957,10 @@ if (isDashboard) {
     const listEl = document.getElementById('messageList');
     if (!listEl) return;
 
+    // Remember if user was near the bottom before re-render
+    const isNearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 80;
+    const wasEmpty = listEl.innerHTML.trim() === '';
+
     listEl.innerHTML = messages.map(msg => {
       const isOwn = user && msg.author_name === user.name;
       const timeStr = new Date(msg.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
@@ -1971,7 +1975,11 @@ if (isDashboard) {
         </div>
       `;
     }).join('');
-    listEl.scrollTop = listEl.scrollHeight;
+
+    // Always scroll to bottom on first open or if user was already at the bottom
+    if (wasEmpty || isNearBottom) {
+      listEl.scrollTop = listEl.scrollHeight;
+    }
   }
 
   window.postNewMessage = async function() {
