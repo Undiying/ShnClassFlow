@@ -2135,10 +2135,15 @@ if (isDashboard) {
             const offer = await paPeerConnection.createOffer();
             await paPeerConnection.setLocalDescription(offer);
 
+            const myName = user.role === 'frontdesk' ? 'Front Desk' : user.name;
+
             paSignalingChannel.send({
               type: 'broadcast',
               event: 'offer',
-              payload: { sdp: offer }
+              payload: { 
+                sdp: offer,
+                senderName: myName
+              }
             });
 
             document.getElementById('intercomStatus').textContent = `Broadcasting to ${className}...`;
@@ -2215,30 +2220,45 @@ if (isDashboard) {
     const allUsers = await getUsers();
     const classrooms = allUsers.filter(u => u.role === 'class');
 
-    if (!classrooms.length) {
-      intercomGrid.innerHTML = '<div class="intercom-help" style="grid-column: span 2; text-align: center; font-size: 0.8rem; color: var(--text-3);">No active classrooms.</div>';
+    // Compile list of possible call targets
+    const targets = [];
+    
+    // 1. If we are NOT the front desk, we can call the Front Desk!
+    if (user.role !== 'frontdesk') {
+      targets.push({ name: 'Front Desk', slug: 'front_desk' });
+    }
+
+    // 2. Add all classrooms except ourselves!
+    classrooms.forEach(c => {
+      if (c.name !== user.name) {
+        targets.push({ name: c.name, slug: c.name.toLowerCase().replace(/[^a-z0-9]/g, '_') });
+      }
+    });
+
+    if (!targets.length) {
+      intercomGrid.innerHTML = '<div class="intercom-help" style="grid-column: span 2; text-align: center; font-size: 0.8rem; color: var(--text-3);">No other active terminals.</div>';
       return;
     }
 
-    intercomGrid.innerHTML = classrooms.map(c => `
-      <button class="intercom-btn" data-class="${c.name}" onclick="togglePA('${c.name}')" id="btnPA_${c.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}">
-        📢 ${c.name}
+    intercomGrid.innerHTML = targets.map(t => `
+      <button class="intercom-btn" data-class="${t.name}" onclick="togglePA('${t.name}')" id="btnPA_${t.slug}">
+        📢 ${t.name}
       </button>
     `).join('');
   }
 
-  // Receiver WebRTC Intercom (Classroom side)
+  // Receiver WebRTC Intercom (Two-way multi-node receiver)
   let incomingPeerConnection = null;
   let paReceiverChannel = null;
 
-  function initPAClassroomReceiver() {
-    if (user.role !== 'class') return;
+  function initPAReceiver() {
+    if (user.role !== 'class' && user.role !== 'frontdesk' && user.role !== 'admin') return;
 
     // Show setup modal if they haven't activated yet
     document.getElementById('paActivationModal').classList.remove('hidden');
 
-    const classSlug = user.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const channelName = `intercom_${classSlug}`;
+    const mySlug = (user.role === 'frontdesk' ? 'Front Desk' : user.name).toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const channelName = `intercom_${mySlug}`;
     console.log(`Classroom listening for PA announcements on channel: ${channelName}`);
 
     paReceiverChannel = sb.channel(channelName, {
@@ -2251,7 +2271,13 @@ if (isDashboard) {
         
         // Show PA active overlay
         const overlay = document.getElementById('paOverlay');
-        if (overlay) overlay.classList.remove('hidden');
+        if (overlay) {
+          overlay.classList.remove('hidden');
+          const sub = document.getElementById('paOverlaySub');
+          if (sub) {
+            sub.textContent = `Broadcasting live audio from ${payload.senderName || 'Intercom'}...`;
+          }
+        }
 
         // Close any existing connection first
         if (incomingPeerConnection) {
@@ -2375,16 +2401,12 @@ if (isDashboard) {
   const intercomReceiverStatus = document.getElementById('intercomReceiverStatus');
 
   if (intercomWidget) {
-    if (user.role === 'frontdesk' || user.role === 'admin') {
+    if (user.role === 'frontdesk' || user.role === 'admin' || user.role === 'class') {
       intercomWidget.style.display = 'block';
       intercomSenderControls.style.display = 'block';
-      intercomReceiverStatus.style.display = 'none';
-      renderIntercomSender();
-    } else if (user.role === 'class') {
-      intercomWidget.style.display = 'block';
-      intercomSenderControls.style.display = 'none';
       intercomReceiverStatus.style.display = 'block';
-      initPAClassroomReceiver();
+      renderIntercomSender();
+      initPAReceiver();
     } else {
       intercomWidget.style.display = 'none';
     }
