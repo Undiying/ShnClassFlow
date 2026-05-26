@@ -1795,7 +1795,7 @@ if (isDashboard) {
         <div class="user-avatar">${u.name.charAt(0)}</div>
         <div>
           <div class="user-name">${u.name}</div>
-          <div class="user-meta">@${u.username} · ${u.role === 'teacher' ? '📚 Teacher' : u.role === 'viewer' ? '👁️ Viewer' : '🗓️ Front Desk'}</div>
+          <div class="user-meta">@${u.username} · ${u.role === 'teacher' ? '📚 Teacher' : u.role === 'viewer' ? '👁️ Viewer' : u.role === 'class' ? '🏫 Classroom' : '🗓️ Front Desk'}</div>
         </div>
         <button class="remove-btn" onclick="deleteUser('${u.id}')">✕</button>
       </div>
