@@ -2190,22 +2190,41 @@ if (isDashboard) {
   };
 
   function updateSenderIntercomUI() {
-    // Reset buttons
-    const btn1 = document.getElementById('btnPAClass1');
-    const btn2 = document.getElementById('btnPAClass2');
-    if (btn1) btn1.className = "intercom-btn";
-    if (btn2) btn2.className = "intercom-btn";
+    const intercomGrid = document.getElementById('intercomSenderGrid');
+    if (!intercomGrid) return;
 
-    if (activePAClass) {
-      const activeBtn = activePAClass === 'Class 1' ? btn1 : btn2;
-      if (activeBtn) {
-        activeBtn.className = "intercom-btn active";
-        activeBtn.innerHTML = `⏹ Stop PA`;
+    const buttons = intercomGrid.querySelectorAll('.intercom-btn');
+    buttons.forEach(btn => {
+      const className = btn.getAttribute('data-class');
+      if (className) {
+        if (activePAClass && activePAClass === className) {
+          btn.className = "intercom-btn active";
+          btn.innerHTML = `⏹ Stop PA`;
+        } else {
+          btn.className = "intercom-btn";
+          btn.innerHTML = `📢 ${className}`;
+        }
       }
-    } else {
-      if (btn1) btn1.innerHTML = `📢 Class 1`;
-      if (btn2) btn2.innerHTML = `📢 Class 2`;
+    });
+  }
+
+  async function renderIntercomSender() {
+    const intercomGrid = document.getElementById('intercomSenderGrid');
+    if (!intercomGrid) return;
+
+    const allUsers = await getUsers();
+    const classrooms = allUsers.filter(u => u.role === 'class');
+
+    if (!classrooms.length) {
+      intercomGrid.innerHTML = '<div class="intercom-help" style="grid-column: span 2; text-align: center; font-size: 0.8rem; color: var(--text-3);">No active classrooms.</div>';
+      return;
     }
+
+    intercomGrid.innerHTML = classrooms.map(c => `
+      <button class="intercom-btn" data-class="${c.name}" onclick="togglePA('${c.name}')" id="btnPA_${c.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}">
+        📢 ${c.name}
+      </button>
+    `).join('');
   }
 
   // Receiver WebRTC Intercom (Classroom side)
@@ -2360,6 +2379,7 @@ if (isDashboard) {
       intercomWidget.style.display = 'block';
       intercomSenderControls.style.display = 'block';
       intercomReceiverStatus.style.display = 'none';
+      renderIntercomSender();
     } else if (user.role === 'class') {
       intercomWidget.style.display = 'block';
       intercomSenderControls.style.display = 'none';

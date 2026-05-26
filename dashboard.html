@@ -41,9 +41,8 @@
         <!-- Front Desk & Admin Controls -->
         <div id="intercomSenderControls" style="display:none">
           <p class="intercom-help">Select a classroom to broadcast live voice:</p>
-          <div class="intercom-grid">
-            <button class="intercom-btn" onclick="togglePA('Class 1')" id="btnPAClass1">📢 Class 1</button>
-            <button class="intercom-btn" onclick="togglePA('Class 2')" id="btnPAClass2">📢 Class 2</button>
+          <div class="intercom-grid" id="intercomSenderGrid">
+            <!-- Rendered dynamically matching registered classrooms -->
           </div>
           <div id="intercomStatus" class="intercom-status-text">Ready</div>
         </div>
