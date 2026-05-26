@@ -32,6 +32,31 @@
       </a>
     </nav>
 
+    <!-- Intercom Widget -->
+    <div class="sidebar-intercom" id="intercomWidget" style="display:none">
+      <div class="intercom-header">
+        <span class="intercom-icon">🎙️</span> School PA Intercom
+      </div>
+      <div class="intercom-body">
+        <!-- Front Desk & Admin Controls -->
+        <div id="intercomSenderControls" style="display:none">
+          <p class="intercom-help">Select a classroom to broadcast live voice:</p>
+          <div class="intercom-grid">
+            <button class="intercom-btn" onclick="togglePA('Class 1')" id="btnPAClass1">📢 Class 1</button>
+            <button class="intercom-btn" onclick="togglePA('Class 2')" id="btnPAClass2">📢 Class 2</button>
+          </div>
+          <div id="intercomStatus" class="intercom-status-text">Ready</div>
+        </div>
+        <!-- Classroom Status -->
+        <div id="intercomReceiverStatus" style="display:none">
+          <div class="intercom-status-indicator">
+            <span class="pulse-indicator green" id="paReceiverPulse"></span>
+            <span id="paReceiverText">PA System Active & Listening</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="sidebar-messages" onclick="openMessageModal()">
       <div class="msg-header">
         <span class="msg-icon">💬</span> Message Board
@@ -341,6 +366,38 @@
           <textarea id="newMessageText" rows="2" placeholder="Type a new message to the team..."></textarea>
           <button class="btn-primary" onclick="postNewMessage()" style="margin-top: 8px;">Post Message</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WebRTC Audio for PA System -->
+  <audio id="paAudio" autoplay style="display:none"></audio>
+
+  <!-- PA Active Overlay for Classroom -->
+  <div id="paOverlay" class="pa-overlay hidden">
+    <div class="pa-overlay-content">
+      <span class="pa-overlay-icon">📢</span>
+      <h1 class="pa-overlay-title">LIVE PA ANNOUNCEMENT</h1>
+      <p class="pa-overlay-sub" id="paOverlaySub">Broadcasting live audio from Front Desk...</p>
+      <div class="pa-visualizer">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PA Activation Modal for Classroom -->
+  <div id="paActivationModal" class="modal-overlay hidden">
+    <div class="modal small" style="max-width: 400px;">
+      <div class="modal-header">
+        <h2>School PA System Setup</h2>
+      </div>
+      <div class="modal-body" style="text-align: center; padding: 20px;">
+        <p style="margin-bottom: 20px; font-size: 1rem; line-height: 1.5; color: var(--text-2);">
+          Modern web browsers require a manual click to enable audio playback before we can play live PA announcements.
+        </p>
+        <button class="btn-primary full" id="btnActivatePA" onclick="activatePAAudio()" style="font-size: 1.1rem; padding: 12px 24px; border-radius: 8px;">
+          🔊 Enable School PA System
+        </button>
       </div>
     </div>
   </div>

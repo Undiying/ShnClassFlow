@@ -250,7 +250,7 @@ if (isLoginPage) {
     const form = document.getElementById('loginForm');
     form.classList.remove('hidden');
     const badge = document.getElementById('loginRoleLabel');
-    const labels = { frontdesk: '🗓️ Front Desk', teacher: '📚 Teacher', admin: '⚙️ Admin' };
+    const labels = { frontdesk: '🗓️ Front Desk', teacher: '📚 Teacher', admin: '⚙️ Admin', viewer: '👁️ Viewer', class: '🏫 Classroom' };
     badge.textContent = labels[role];
     badge.className = `role-badge role-${role}`;
     document.getElementById('loginUser').value = '';
@@ -339,7 +339,9 @@ if (isDashboard) {
   // Populate sidebar
   document.getElementById('sidebarName').textContent = user.name;
   document.getElementById('sidebarRole').textContent =
-    user.role === 'frontdesk' ? 'Front Desk' : user.role.charAt(0).toUpperCase() + user.role.slice(1);
+    user.role === 'frontdesk' ? 'Front Desk' :
+    user.role === 'class' ? '🏫 Classroom' :
+    user.role.charAt(0).toUpperCase() + user.role.slice(1);
   document.getElementById('sidebarAvatar').textContent = user.name.charAt(0).toUpperCase();
 
   // Role-specific UI
@@ -349,18 +351,18 @@ if (isDashboard) {
   }
 
   // Front desk and viewer cannot register students
-  if (user.role === 'frontdesk' || user.role === 'viewer') {
+  if (user.role === 'frontdesk' || user.role === 'viewer' || user.role === 'class') {
     const regBtn = document.getElementById('registerStudentBtn');
     if (regBtn) regBtn.style.display = 'none';
   }
 
-  if (user.role === 'viewer') {
+  if (user.role === 'viewer' || user.role === 'class') {
     const b1 = document.getElementById('bookBtn');
     if (b1) b1.style.display = 'none';
     const b2 = document.getElementById('bookBtn2');
     if (b2) b2.style.display = 'none';
     const sub = document.getElementById('viewSub');
-    if (sub) sub.textContent = 'Weekly class schedule (View Only)';
+    if (sub) sub.textContent = user.role === 'class' ? 'Classroom calendar view' : 'Weekly class schedule (View Only)';
   } else if (user.role === 'teacher') {
     document.getElementById('bookBtn').textContent = '+ Create Time Slot';
     document.getElementById('bookBtn2').textContent = '+ Create Time Slot';
@@ -2045,4 +2047,326 @@ if (isDashboard) {
       renderMessages();
     }
   }, 8000);
+
+  // ── WebRTC Intercom / PA System ──────────────────────────────
+  let paLocalStream = null;
+  let paPeerConnection = null;
+  let paSignalingChannel = null;
+  let activePAClass = null;
+
+  const stunConfig = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  };
+
+  // Toggle PA broadcast (Front desk / Admin)
+  window.togglePA = async function(className) {
+    if (activePAClass) {
+      if (activePAClass === className) {
+        // Clicked active class -> stop broadcast
+        await stopPA();
+      } else {
+        // Clicked another class -> stop active first, then start new one
+        await stopPA();
+        await startPA(className);
+      }
+    } else {
+      // Start fresh broadcast
+      await startPA(className);
+    }
+  };
+
+  async function startPA(className) {
+    console.log(`Starting PA broadcast to ${className}...`);
+    activePAClass = className;
+    updateSenderIntercomUI();
+
+    const classSlug = className.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const channelName = `intercom_${classSlug}`;
+
+    try {
+      // 1. Get mic access
+      paLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      
+      // 2. Initialize signaling channel
+      paSignalingChannel = sb.channel(channelName, {
+        config: { broadcast: { self: false } }
+      });
+
+      // Listen for answers and ICE candidates from classroom
+      paSignalingChannel
+        .on('broadcast', { event: 'answer' }, async ({ payload }) => {
+          console.log("Received answer from classroom:", payload);
+          if (paPeerConnection) {
+            await paPeerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          }
+        })
+        .on('broadcast', { event: 'candidate' }, async ({ payload }) => {
+          console.log("Received ICE candidate from classroom:", payload);
+          if (paPeerConnection && payload.candidate) {
+            await paPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          }
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log("Signaling channel subscribed. Creating peer connection...");
+            // Create WebRTC peer connection
+            paPeerConnection = new RTCPeerConnection(stunConfig);
+
+            // Add audio track to peer connection
+            paLocalStream.getTracks().forEach(track => {
+              paPeerConnection.addTrack(track, paLocalStream);
+            });
+
+            // Gather local ICE candidates and send them
+            paPeerConnection.onicecandidate = (event) => {
+              if (event.candidate && paSignalingChannel) {
+                paSignalingChannel.send({
+                  type: 'broadcast',
+                  event: 'candidate',
+                  payload: { candidate: event.candidate }
+                });
+              }
+            };
+
+            // Create and send offer
+            const offer = await paPeerConnection.createOffer();
+            await paPeerConnection.setLocalDescription(offer);
+
+            paSignalingChannel.send({
+              type: 'broadcast',
+              event: 'offer',
+              payload: { sdp: offer }
+            });
+
+            document.getElementById('intercomStatus').textContent = `Broadcasting to ${className}...`;
+          }
+        });
+
+    } catch (err) {
+      console.error("Error starting PA system:", err);
+      alert("Error starting PA system. Please check microphone permissions.");
+      await stopPA();
+    }
+  }
+
+  window.stopPA = async function() {
+    console.log("Stopping PA broadcast...");
+    activePAClass = null;
+    updateSenderIntercomUI();
+
+    document.getElementById('intercomStatus').textContent = "Ready";
+
+    // Broadcast hangup to classroom so they immediately close connection and overlay
+    if (paSignalingChannel) {
+      try {
+        await paSignalingChannel.send({
+          type: 'broadcast',
+          event: 'hangup',
+          payload: {}
+        });
+      } catch (e) {
+        console.error("Error sending hangup:", e);
+      }
+      
+      // Cleanup channel
+      sb.removeChannel(paSignalingChannel);
+      paSignalingChannel = null;
+    }
+
+    // Cleanup local stream
+    if (paLocalStream) {
+      paLocalStream.getTracks().forEach(track => track.stop());
+      paLocalStream = null;
+    }
+
+    // Cleanup WebRTC connection
+    if (paPeerConnection) {
+      paPeerConnection.close();
+      paPeerConnection = null;
+    }
+  };
+
+  function updateSenderIntercomUI() {
+    // Reset buttons
+    const btn1 = document.getElementById('btnPAClass1');
+    const btn2 = document.getElementById('btnPAClass2');
+    if (btn1) btn1.className = "intercom-btn";
+    if (btn2) btn2.className = "intercom-btn";
+
+    if (activePAClass) {
+      const activeBtn = activePAClass === 'Class 1' ? btn1 : btn2;
+      if (activeBtn) {
+        activeBtn.className = "intercom-btn active";
+        activeBtn.innerHTML = `⏹ Stop PA`;
+      }
+    } else {
+      if (btn1) btn1.innerHTML = `📢 Class 1`;
+      if (btn2) btn2.innerHTML = `📢 Class 2`;
+    }
+  }
+
+  // Receiver WebRTC Intercom (Classroom side)
+  let incomingPeerConnection = null;
+  let paReceiverChannel = null;
+
+  function initPAClassroomReceiver() {
+    if (user.role !== 'class') return;
+
+    // Show setup modal if they haven't activated yet
+    document.getElementById('paActivationModal').classList.remove('hidden');
+
+    const classSlug = user.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const channelName = `intercom_${classSlug}`;
+    console.log(`Classroom listening for PA announcements on channel: ${channelName}`);
+
+    paReceiverChannel = sb.channel(channelName, {
+      config: { broadcast: { self: false } }
+    });
+
+    paReceiverChannel
+      .on('broadcast', { event: 'offer' }, async ({ payload }) => {
+        console.log("PA Broadcast incoming! Offer received:", payload);
+        
+        // Show PA active overlay
+        const overlay = document.getElementById('paOverlay');
+        if (overlay) overlay.classList.remove('hidden');
+
+        // Close any existing connection first
+        if (incomingPeerConnection) {
+          incomingPeerConnection.close();
+        }
+
+        incomingPeerConnection = new RTCPeerConnection(stunConfig);
+
+        // Handle track
+        incomingPeerConnection.ontrack = (event) => {
+          console.log("PA audio track received, playing...", event.streams[0]);
+          const paAudio = document.getElementById('paAudio');
+          if (paAudio) {
+            paAudio.srcObject = event.streams[0];
+            paAudio.play().then(() => {
+              console.log("Audio is playing successfully.");
+            }).catch(e => {
+              console.error("Audio playback failed:", e);
+            });
+          }
+        };
+
+        // Handle ICE candidates
+        incomingPeerConnection.onicecandidate = (event) => {
+          if (event.candidate && paReceiverChannel) {
+            paReceiverChannel.send({
+              type: 'broadcast',
+              event: 'candidate',
+              payload: { candidate: event.candidate }
+            });
+          }
+        };
+
+        try {
+          await incomingPeerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          const answer = await incomingPeerConnection.createAnswer();
+          await incomingPeerConnection.setLocalDescription(answer);
+
+          // Send answer back to sender
+          paReceiverChannel.send({
+            type: 'broadcast',
+            event: 'answer',
+            payload: { sdp: answer }
+          });
+
+          // Update classroom indicator
+          updateReceiverUI(true);
+
+        } catch (err) {
+          console.error("Error responding to PA offer:", err);
+          cleanupReceiverPA();
+        }
+      })
+      .on('broadcast', { event: 'candidate' }, async ({ payload }) => {
+        if (incomingPeerConnection && payload.candidate) {
+          try {
+            await incomingPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          } catch (e) {
+            console.error("Error adding ice candidate:", e);
+          }
+        }
+      })
+      .on('broadcast', { event: 'hangup' }, () => {
+        console.log("PA broadcast ended by sender.");
+        cleanupReceiverPA();
+      })
+      .subscribe();
+  }
+
+  function cleanupReceiverPA() {
+    const overlay = document.getElementById('paOverlay');
+    if (overlay) overlay.classList.add('hidden');
+
+    const paAudio = document.getElementById('paAudio');
+    if (paAudio) {
+      paAudio.srcObject = null;
+    }
+
+    if (incomingPeerConnection) {
+      incomingPeerConnection.close();
+      incomingPeerConnection = null;
+    }
+
+    updateReceiverUI(false);
+  }
+
+  function updateReceiverUI(isBroadcasting) {
+    const indicator = document.getElementById('paReceiverPulse');
+    const text = document.getElementById('paReceiverText');
+    if (!indicator || !text) return;
+
+    if (isBroadcasting) {
+      indicator.className = "pulse-indicator red";
+      text.textContent = "📢 RECEIVING LIVE BROADCAST";
+      text.style.color = "#e74c3c";
+    } else {
+      indicator.className = "pulse-indicator green";
+      text.textContent = "PA System Active & Listening";
+      text.style.color = "";
+    }
+  }
+
+  window.activatePAAudio = function() {
+    const paAudio = document.getElementById('paAudio');
+    if (paAudio) {
+      // Play a short silent base64 tone to unlock browser auto-play
+      paAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      paAudio.play().then(() => {
+        console.log("Classroom PA audio playback successfully unlocked.");
+        document.getElementById('paActivationModal').classList.add('hidden');
+      }).catch(err => {
+        console.error("Error unlocking classroom PA audio:", err);
+        alert("Autoplay unlock failed. Please click the button again or refresh.");
+      });
+    }
+  };
+
+  // Render correct Intercom controls based on role
+  const intercomWidget = document.getElementById('intercomWidget');
+  const intercomSenderControls = document.getElementById('intercomSenderControls');
+  const intercomReceiverStatus = document.getElementById('intercomReceiverStatus');
+
+  if (intercomWidget) {
+    if (user.role === 'frontdesk' || user.role === 'admin') {
+      intercomWidget.style.display = 'block';
+      intercomSenderControls.style.display = 'block';
+      intercomReceiverStatus.style.display = 'none';
+    } else if (user.role === 'class') {
+      intercomWidget.style.display = 'block';
+      intercomSenderControls.style.display = 'none';
+      intercomReceiverStatus.style.display = 'block';
+      initPAClassroomReceiver();
+    } else {
+      intercomWidget.style.display = 'none';
+    }
+  }
 }
