@@ -1948,6 +1948,9 @@ if (isDashboard) {
   window.openMessageModal = async function() {
     document.getElementById('messageModal').classList.remove('hidden');
     await renderMessages();
+    // Always scroll to bottom (latest messages) when the modal opens
+    const listEl = document.getElementById('messageList');
+    if (listEl) listEl.scrollTop = listEl.scrollHeight;
   };
 
   window.closeMessageModal = function() {
@@ -2363,6 +2366,17 @@ if (isDashboard) {
 
     updateReceiverUI(false);
   }
+
+  // Global hang-up handler: works for both sender and receiver roles
+  window.hangUpCall = async function() {
+    if (activePAClass) {
+      // This terminal is the current sender — stop the broadcast
+      await stopPA();
+    } else {
+      // This terminal is a receiver — clean up local connection and hide overlay
+      cleanupReceiverPA();
+    }
+  };
 
   function updateReceiverUI(isBroadcasting) {
     const indicator = document.getElementById('paReceiverPulse');

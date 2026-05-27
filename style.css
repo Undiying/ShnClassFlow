@@ -1372,6 +1372,31 @@ html, body {
   color: #fff;
   margin-bottom: 2rem;
 }
+.pa-hangup-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 2rem;
+  padding: 0.85rem 2.2rem;
+  background: #e74c3c;
+  color: #fff;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-radius: 50px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+  box-shadow: 0 4px 20px rgba(231, 76, 60, 0.5);
+}
+.pa-hangup-btn:hover {
+  background: #c0392b;
+  transform: scale(1.05);
+  box-shadow: 0 6px 28px rgba(231, 76, 60, 0.7);
+}
+.pa-hangup-btn:active {
+  transform: scale(0.97);
+}
 .pa-visualizer {
   display: flex;
   justify-content: center;
