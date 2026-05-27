@@ -1918,7 +1918,7 @@ if (isDashboard) {
       const raw = localStorage.getItem('cf_messages');
       return raw ? JSON.parse(raw) : [];
     }
-    const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: false });
+    const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: true });
     if (error) {
       console.error('Error fetching messages:', error);
       return [];
@@ -2008,7 +2008,7 @@ if (isDashboard) {
     if (!authorEl || !textEl || !timeEl) return;
 
     if (messages.length > 0) {
-      const latest = messages[0];
+      const latest = messages[messages.length - 1];
       authorEl.textContent = latest.author_name;
       textEl.textContent = latest.content;
       const dateObj = new Date(latest.created_at);
