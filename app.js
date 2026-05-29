@@ -2025,24 +2025,115 @@ if (isDashboard) {
   renderLatestMessage();
   renderCalendar();
 
-  // Subscribe to Postgres changes on 'messages' table for real-time updates
+  // ── Notification Utilities ───────────────────────────────────────
+  let _titleBlinkInterval = null;
+  const _originalTitle = document.title;
+
+  function playGong() {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const mkTone = (freq, endFreq, vol, endVol, dur) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(endFreq, audioCtx.currentTime + dur);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(endVol, audioCtx.currentTime + dur);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + dur);
+      };
+      mkTone(660, 330, 0.6, 0.001, 2.5);
+      mkTone(1320, 660, 0.35, 0.001, 0.9);
+    } catch (e) {
+      console.warn('Could not play gong sound:', e);
+    }
+  }
+
+  function setFaviconEmoji(emoji) {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 32; canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      ctx.font = '26px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(emoji, 16, 18);
+      let link = document.querySelector("link[rel*='icon']");
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.href = canvas.toDataURL();
+    } catch (e) {}
+  }
+
+  function startTabAlert(label) {
+    clearInterval(_titleBlinkInterval);
+    setFaviconEmoji('🔔');
+    let toggle = true;
+    _titleBlinkInterval = setInterval(() => {
+      document.title = toggle ? `🔔 ${label} | ClassFlow` : _originalTitle;
+      toggle = !toggle;
+    }, 1000);
+  }
+
+  function stopTabAlert() {
+    clearInterval(_titleBlinkInterval);
+    _titleBlinkInterval = null;
+    document.title = _originalTitle;
+    setFaviconEmoji('🏫');
+  }
+
+  window.addEventListener('focus', stopTabAlert);
+
+  function showBrowserNotification(title, body, onClick) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const n = new Notification(title, { body });
+      if (onClick) n.onclick = () => { window.focus(); onClick(); };
+      return n;
+    }
+    return null;
+  }
+
+  // Request browser notification permission immediately on login
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+
+  // ── Message real-time subscription ──────────────────────────────
   if (sb && !SUPABASE_URL.includes('YOUR')) {
     sb.channel('realtime_messages')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        () => {
+        (payload) => {
+          const newMsg = payload.new;
+          const isFromMe = user && newMsg.author_name === user.name;
+
           renderLatestMessage();
           const modal = document.getElementById('messageModal');
           if (modal && !modal.classList.contains('hidden')) {
             renderMessages();
+          }
+
+          // Only alert for messages from other people
+          if (!isFromMe) {
+            playGong();
+            if (document.hidden || document.visibilityState !== 'visible') {
+              startTabAlert(`New message from ${newMsg.author_name}!`);
+              showBrowserNotification(
+                `💬 New message from ${newMsg.author_name}`,
+                newMsg.content,
+                () => openMessageModal()
+              );
+            }
           }
         }
       )
       .subscribe();
   }
 
-  // Polling fallback to keep message board perfectly in sync every 8 seconds
+  // Polling fallback to keep message board in sync every 8 seconds
   setInterval(() => {
     renderLatestMessage();
     const modal = document.getElementById('messageModal');
@@ -2051,146 +2142,181 @@ if (isDashboard) {
     }
   }, 8000);
 
-  // ── WebRTC Intercom / PA System ──────────────────────────────
+  // ── WebRTC Intercom / PA System ──────────────────────────────────
+  //
+  // Architecture:
+  //   Each call uses a freshly-generated unique "back-channel"
+  //   (intercom_back_<uuid>) so there are never channel name conflicts
+  //   between consecutive or simultaneous calls.
+  //
+  //   Sender  → sends OFFER to target's well-known channel (intercom_<slug>)
+  //           → listens on its unique back-channel for ANSWER + ICE
+  //   Receiver→ receives OFFER on its well-known channel
+  //           → subscribes to the back-channel provided in offer.replyTo
+  //           → sends ANSWER + ICE on that back-channel
+  //           → receives HANGUP on that back-channel
+  //
   let paLocalStream = null;
   let paPeerConnection = null;
-  let paSignalingChannel = null;
+  let paBackChannel = null;   // sender's unique back-channel
+  let paOfferChannel = null;  // temporary channel used only to deliver the offer
   let activePAClass = null;
+  let paSenderIceBuffer = [];
+  let paBackReady = false;
+
+  let incomingPeerConnection = null;
+  let paReceiverChannel = null;  // well-known receiver channel (persistent)
+  let currentReplyChannel = null; // per-call back-channel on receiver side
+  let replyChannelReady = false;
+  let replyIceBuffer = [];
 
   const stunConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
     ]
   };
 
-  // Toggle PA broadcast (Front desk / Admin)
   window.togglePA = async function(className) {
     if (activePAClass) {
       if (activePAClass === className) {
-        // Clicked active class -> stop broadcast
         await stopPA();
       } else {
-        // Clicked another class -> stop active first, then start new one
         await stopPA();
+        // Allow Supabase to fully close old channels before opening new ones
+        await new Promise(r => setTimeout(r, 350));
         await startPA(className);
       }
     } else {
-      // Start fresh broadcast
       await startPA(className);
     }
   };
 
   async function startPA(className) {
-    console.log(`Starting PA broadcast to ${className}...`);
+    console.log(`Starting PA to ${className}...`);
     activePAClass = className;
     updateSenderIntercomUI();
+    paSenderIceBuffer = [];
+    paBackReady = false;
 
-    const classSlug = className.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const channelName = `intercom_${classSlug}`;
+    const targetSlug = className.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    // Unique session ID ensures no channel-name collisions across calls
+    const sessionId = `${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const backChannelName = `intercom_back_${sessionId}`;
 
     try {
-      // 1. Get mic access
       paLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      
-      // 2. Initialize signaling channel
-      paSignalingChannel = sb.channel(channelName, {
+
+      // 1. Subscribe to the unique back-channel to receive answer + ICE from receiver
+      paBackChannel = sb.channel(backChannelName, {
         config: { broadcast: { self: false } }
       });
 
-      // Listen for answers and ICE candidates from classroom
-      paSignalingChannel
+      paBackChannel
         .on('broadcast', { event: 'answer' }, async ({ payload }) => {
-          console.log("Received answer from classroom:", payload);
-          if (paPeerConnection) {
-            await paPeerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          console.log('Answer received from receiver');
+          if (paPeerConnection && paPeerConnection.signalingState !== 'stable') {
+            try {
+              await paPeerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+              const statusEl = document.getElementById('intercomStatus');
+              if (statusEl) statusEl.textContent = `Connected to ${className} ✓`;
+            } catch (e) { console.error('setRemoteDescription failed:', e); }
           }
         })
         .on('broadcast', { event: 'candidate' }, async ({ payload }) => {
-          console.log("Received ICE candidate from classroom:", payload);
           if (paPeerConnection && payload.candidate) {
-            await paPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            try {
+              await paPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            } catch (e) { console.error('addIceCandidate (receiver→sender) failed:', e); }
           }
         })
         .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            console.log("Signaling channel subscribed. Creating peer connection...");
-            // Create WebRTC peer connection
-            paPeerConnection = new RTCPeerConnection(stunConfig);
+          if (status !== 'SUBSCRIBED') return;
+          paBackReady = true;
+          console.log(`Back-channel ${backChannelName} ready`);
 
-            // Add audio track to peer connection
-            paLocalStream.getTracks().forEach(track => {
-              paPeerConnection.addTrack(track, paLocalStream);
-            });
+          // 2. Create peer connection
+          paPeerConnection = new RTCPeerConnection(stunConfig);
+          paLocalStream.getTracks().forEach(t => paPeerConnection.addTrack(t, paLocalStream));
 
-            // Gather local ICE candidates and send them
-            paPeerConnection.onicecandidate = (event) => {
-              if (event.candidate && paSignalingChannel) {
-                paSignalingChannel.send({
-                  type: 'broadcast',
-                  event: 'candidate',
-                  payload: { candidate: event.candidate }
-                });
-              }
-            };
+          paPeerConnection.onicecandidate = (event) => {
+            if (!event.candidate) return;
+            const msg = { type: 'broadcast', event: 'sender_candidate', payload: { candidate: event.candidate } };
+            if (paBackReady && paBackChannel) {
+              paBackChannel.send(msg);
+            } else {
+              paSenderIceBuffer.push(event.candidate);
+            }
+          };
 
-            // Create and send offer
-            const offer = await paPeerConnection.createOffer();
-            await paPeerConnection.setLocalDescription(offer);
+          paPeerConnection.onconnectionstatechange = () => {
+            const s = paPeerConnection?.connectionState;
+            console.log('Sender WebRTC state:', s);
+            if (s === 'failed') stopPA();
+          };
 
-            const myName = user.role === 'frontdesk' ? 'Front Desk' : user.name;
+          // 3. Create offer
+          const offer = await paPeerConnection.createOffer();
+          await paPeerConnection.setLocalDescription(offer);
+          const myName = user.role === 'frontdesk' ? 'Front Desk' : user.name;
 
-            paSignalingChannel.send({
+          // 4. Deliver offer via the target's well-known receiver channel
+          //    We only subscribe long enough to fire the offer, then let it persist
+          //    (Supabase broadcast is fire-and-forget; the channel is cleaned in stopPA)
+          paOfferChannel = sb.channel(`intercom_${targetSlug}`, {
+            config: { broadcast: { self: false } }
+          });
+          paOfferChannel.subscribe(async (offerStatus) => {
+            if (offerStatus !== 'SUBSCRIBED') return;
+            await paOfferChannel.send({
               type: 'broadcast',
               event: 'offer',
-              payload: { 
-                sdp: offer,
-                senderName: myName
-              }
+              payload: { sdp: offer, senderName: myName, replyTo: backChannelName }
             });
+            console.log(`Offer sent to ${className} via intercom_${targetSlug}`);
+            const statusEl = document.getElementById('intercomStatus');
+            if (statusEl) statusEl.textContent = `Calling ${className}...`;
+          });
 
-            document.getElementById('intercomStatus').textContent = `Broadcasting to ${className}...`;
+          // Flush any ICE candidates gathered before back-channel was confirmed ready
+          for (const candidate of paSenderIceBuffer) {
+            paBackChannel.send({ type: 'broadcast', event: 'sender_candidate', payload: { candidate } });
           }
+          paSenderIceBuffer = [];
         });
 
     } catch (err) {
-      console.error("Error starting PA system:", err);
-      alert("Error starting PA system. Please check microphone permissions.");
+      console.error('Error starting PA system:', err);
+      alert('Error starting PA system. Please check microphone permissions.');
       await stopPA();
     }
   }
 
   window.stopPA = async function() {
-    console.log("Stopping PA broadcast...");
+    console.log('Stopping PA broadcast...');
     activePAClass = null;
+    paBackReady = false;
+    paSenderIceBuffer = [];
     updateSenderIntercomUI();
+    const statusEl = document.getElementById('intercomStatus');
+    if (statusEl) statusEl.textContent = 'Ready';
 
-    document.getElementById('intercomStatus').textContent = "Ready";
-
-    // Broadcast hangup to classroom so they immediately close connection and overlay
-    if (paSignalingChannel) {
-      try {
-        await paSignalingChannel.send({
-          type: 'broadcast',
-          event: 'hangup',
-          payload: {}
-        });
-      } catch (e) {
-        console.error("Error sending hangup:", e);
-      }
-      
-      // Cleanup channel
-      sb.removeChannel(paSignalingChannel);
-      paSignalingChannel = null;
+    // Send hangup on back-channel (receiver is subscribed there)
+    if (paBackChannel) {
+      try { await paBackChannel.send({ type: 'broadcast', event: 'hangup', payload: {} }); } catch (e) {}
+      try { await sb.removeChannel(paBackChannel); } catch (e) {}
+      paBackChannel = null;
     }
-
-    // Cleanup local stream
+    if (paOfferChannel) {
+      try { await sb.removeChannel(paOfferChannel); } catch (e) {}
+      paOfferChannel = null;
+    }
     if (paLocalStream) {
-      paLocalStream.getTracks().forEach(track => track.stop());
+      paLocalStream.getTracks().forEach(t => t.stop());
       paLocalStream = null;
     }
-
-    // Cleanup WebRTC connection
     if (paPeerConnection) {
       paPeerConnection.close();
       paPeerConnection = null;
@@ -2200,18 +2326,15 @@ if (isDashboard) {
   function updateSenderIntercomUI() {
     const intercomGrid = document.getElementById('intercomSenderGrid');
     if (!intercomGrid) return;
-
-    const buttons = intercomGrid.querySelectorAll('.intercom-btn');
-    buttons.forEach(btn => {
-      const className = btn.getAttribute('data-class');
-      if (className) {
-        if (activePAClass && activePAClass === className) {
-          btn.className = "intercom-btn active";
-          btn.innerHTML = `⏹ Stop PA`;
-        } else {
-          btn.className = "intercom-btn";
-          btn.innerHTML = `📢 ${className}`;
-        }
+    intercomGrid.querySelectorAll('.intercom-btn').forEach(btn => {
+      const cls = btn.getAttribute('data-class');
+      if (!cls) return;
+      if (activePAClass && activePAClass === cls) {
+        btn.className = 'intercom-btn active';
+        btn.innerHTML = '⏹ Stop PA';
+      } else {
+        btn.className = 'intercom-btn';
+        btn.innerHTML = `📢 ${cls}`;
       }
     });
   }
@@ -2222,16 +2345,11 @@ if (isDashboard) {
 
     const allUsers = await getUsers();
     const classrooms = allUsers.filter(u => u.role === 'class');
-
-    // Compile list of possible call targets
     const targets = [];
-    
-    // 1. If we are NOT the front desk, we can call the Front Desk!
+
     if (user.role !== 'frontdesk') {
       targets.push({ name: 'Front Desk', slug: 'front_desk' });
     }
-
-    // 2. Add all classrooms except ourselves!
     classrooms.forEach(c => {
       if (c.name !== user.name) {
         targets.push({ name: c.name, slug: c.name.toLowerCase().replace(/[^a-z0-9]/g, '_') });
@@ -2242,7 +2360,6 @@ if (isDashboard) {
       intercomGrid.innerHTML = '<div class="intercom-help" style="grid-column: span 2; text-align: center; font-size: 0.8rem; color: var(--text-3);">No other active terminals.</div>';
       return;
     }
-
     intercomGrid.innerHTML = targets.map(t => `
       <button class="intercom-btn" data-class="${t.name}" onclick="togglePA('${t.name}')" id="btnPA_${t.slug}">
         📢 ${t.name}
@@ -2250,19 +2367,22 @@ if (isDashboard) {
     `).join('');
   }
 
-  // Receiver WebRTC Intercom (Two-way multi-node receiver)
-  let incomingPeerConnection = null;
-  let paReceiverChannel = null;
-
+  // ── PA Receiver ───────────────────────────────────────────────────
   function initPAReceiver() {
     if (user.role !== 'class' && user.role !== 'frontdesk' && user.role !== 'admin') return;
 
-    // Show setup modal if they haven't activated yet
     document.getElementById('paActivationModal').classList.remove('hidden');
 
-    const mySlug = (user.role === 'frontdesk' ? 'Front Desk' : user.name).toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const mySlug = (user.role === 'frontdesk' ? 'Front Desk' : user.name)
+      .toLowerCase().replace(/[^a-z0-9]/g, '_');
     const channelName = `intercom_${mySlug}`;
-    console.log(`Classroom listening for PA announcements on channel: ${channelName}`);
+    console.log(`PA Receiver listening on: ${channelName}`);
+
+    // Clean up any stale receiver channel before re-subscribing
+    if (paReceiverChannel) {
+      try { sb.removeChannel(paReceiverChannel); } catch (e) {}
+      paReceiverChannel = null;
+    }
 
     paReceiverChannel = sb.channel(channelName, {
       config: { broadcast: { self: false } }
@@ -2270,110 +2390,152 @@ if (isDashboard) {
 
     paReceiverChannel
       .on('broadcast', { event: 'offer' }, async ({ payload }) => {
-        console.log("PA Broadcast incoming! Offer received:", payload);
-        
-        // Show PA active overlay
+        console.log('Incoming call from:', payload.senderName);
+        const { sdp, senderName, replyTo } = payload;
+
+        // Keep screen alive in background tabs (if supported)
+        if ('wakeLock' in navigator) {
+          try { await navigator.wakeLock.request('screen'); } catch (e) {}
+        }
+
+        // Notify if tab is not visible
+        if (document.hidden) {
+          startTabAlert(`📞 Incoming call from ${senderName || 'Intercom'}!`);
+          showBrowserNotification(
+            `📢 Incoming Intercom Call`,
+            `${senderName || 'Someone'} is calling — tap to answer`,
+            () => window.focus()
+          );
+        }
+
+        // Show overlay
         const overlay = document.getElementById('paOverlay');
         if (overlay) {
           overlay.classList.remove('hidden');
           const sub = document.getElementById('paOverlaySub');
-          if (sub) {
-            sub.textContent = `Broadcasting live audio from ${payload.senderName || 'Intercom'}...`;
-          }
+          if (sub) sub.textContent = `Live call from ${senderName || 'Intercom'}...`;
         }
 
-        // Close any existing connection first
+        // Cleanup any lingering state from a previous call
+        _cleanupReplyChannel();
         if (incomingPeerConnection) {
           incomingPeerConnection.close();
+          incomingPeerConnection = null;
         }
 
+        replyIceBuffer = [];
+        replyChannelReady = false;
         incomingPeerConnection = new RTCPeerConnection(stunConfig);
 
-        // Handle track
         incomingPeerConnection.ontrack = (event) => {
-          console.log("PA audio track received, playing...", event.streams[0]);
+          console.log('Audio track received');
           const paAudio = document.getElementById('paAudio');
           if (paAudio) {
             paAudio.srcObject = event.streams[0];
-            paAudio.play().then(() => {
-              console.log("Audio is playing successfully.");
-            }).catch(e => {
-              console.error("Audio playback failed:", e);
-            });
+            paAudio.play().catch(e => console.error('Audio play failed:', e));
           }
         };
 
-        // Handle ICE candidates
+        incomingPeerConnection.onconnectionstatechange = () => {
+          const s = incomingPeerConnection?.connectionState;
+          console.log('Receiver WebRTC state:', s);
+          if (s === 'failed' || s === 'disconnected') cleanupReceiverPA();
+        };
+
         incomingPeerConnection.onicecandidate = (event) => {
-          if (event.candidate && paReceiverChannel) {
-            paReceiverChannel.send({
-              type: 'broadcast',
-              event: 'candidate',
-              payload: { candidate: event.candidate }
-            });
+          if (!event.candidate) return;
+          if (replyChannelReady && currentReplyChannel) {
+            currentReplyChannel.send({ type: 'broadcast', event: 'candidate', payload: { candidate: event.candidate } });
+          } else {
+            replyIceBuffer.push(event.candidate);
           }
         };
 
         try {
-          await incomingPeerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          await incomingPeerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
           const answer = await incomingPeerConnection.createAnswer();
           await incomingPeerConnection.setLocalDescription(answer);
 
-          // Send answer back to sender
-          paReceiverChannel.send({
-            type: 'broadcast',
-            event: 'answer',
-            payload: { sdp: answer }
+          // Subscribe to the sender's unique back-channel to reply
+          currentReplyChannel = sb.channel(replyTo, {
+            config: { broadcast: { self: false } }
           });
 
-          // Update classroom indicator
+          currentReplyChannel
+            .on('broadcast', { event: 'sender_candidate' }, async ({ payload }) => {
+              if (incomingPeerConnection && payload.candidate) {
+                try {
+                  await incomingPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                } catch (e) { console.error('addIceCandidate (sender→receiver) failed:', e); }
+              }
+            })
+            .on('broadcast', { event: 'hangup' }, () => {
+              console.log('Sender ended the call.');
+              cleanupReceiverPA();
+            })
+            .subscribe(async (status) => {
+              if (status !== 'SUBSCRIBED') return;
+              replyChannelReady = true;
+              console.log(`Reply channel ${replyTo} ready`);
+
+              // Send the answer
+              await currentReplyChannel.send({
+                type: 'broadcast', event: 'answer',
+                payload: { sdp: answer }
+              });
+
+              // Flush buffered receiver ICE candidates
+              for (const candidate of replyIceBuffer) {
+                await currentReplyChannel.send({ type: 'broadcast', event: 'candidate', payload: { candidate } });
+              }
+              replyIceBuffer = [];
+            });
+
           updateReceiverUI(true);
 
         } catch (err) {
-          console.error("Error responding to PA offer:", err);
+          console.error('Error responding to PA offer:', err);
           cleanupReceiverPA();
         }
       })
-      .on('broadcast', { event: 'candidate' }, async ({ payload }) => {
-        if (incomingPeerConnection && payload.candidate) {
-          try {
-            await incomingPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
-          } catch (e) {
-            console.error("Error adding ice candidate:", e);
-          }
+      .subscribe((status) => {
+        console.log(`PA Receiver channel [${channelName}] status: ${status}`);
+        // Auto-reconnect if the Supabase connection drops
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('Receiver channel lost. Reconnecting in 3 s...');
+          setTimeout(() => initPAReceiver(), 3000);
         }
-      })
-      .on('broadcast', { event: 'hangup' }, () => {
-        console.log("PA broadcast ended by sender.");
-        cleanupReceiverPA();
-      })
-      .subscribe();
+      });
+  }
+
+  function _cleanupReplyChannel() {
+    if (currentReplyChannel) {
+      try { sb.removeChannel(currentReplyChannel); } catch (e) {}
+      currentReplyChannel = null;
+      replyChannelReady = false;
+      replyIceBuffer = [];
+    }
   }
 
   function cleanupReceiverPA() {
+    stopTabAlert();
     const overlay = document.getElementById('paOverlay');
     if (overlay) overlay.classList.add('hidden');
-
     const paAudio = document.getElementById('paAudio');
-    if (paAudio) {
-      paAudio.srcObject = null;
-    }
-
+    if (paAudio) paAudio.srcObject = null;
     if (incomingPeerConnection) {
       incomingPeerConnection.close();
       incomingPeerConnection = null;
     }
-
+    _cleanupReplyChannel();
     updateReceiverUI(false);
   }
 
-  // Global hang-up handler: works for both sender and receiver roles
+  // Global hang-up: works for both sender and receiver
   window.hangUpCall = async function() {
     if (activePAClass) {
-      // This terminal is the current sender — stop the broadcast
       await stopPA();
     } else {
-      // This terminal is a receiver — clean up local connection and hide overlay
       cleanupReceiverPA();
     }
   };
@@ -2382,34 +2544,32 @@ if (isDashboard) {
     const indicator = document.getElementById('paReceiverPulse');
     const text = document.getElementById('paReceiverText');
     if (!indicator || !text) return;
-
     if (isBroadcasting) {
-      indicator.className = "pulse-indicator red";
-      text.textContent = "📢 RECEIVING LIVE BROADCAST";
-      text.style.color = "#e74c3c";
+      indicator.className = 'pulse-indicator red';
+      text.textContent = '📢 RECEIVING LIVE BROADCAST';
+      text.style.color = '#e74c3c';
     } else {
-      indicator.className = "pulse-indicator green";
-      text.textContent = "PA System Active & Listening";
-      text.style.color = "";
+      indicator.className = 'pulse-indicator green';
+      text.textContent = 'PA System Active & Listening';
+      text.style.color = '';
     }
   }
 
   window.activatePAAudio = function() {
     const paAudio = document.getElementById('paAudio');
     if (paAudio) {
-      // Play a short silent base64 tone to unlock browser auto-play
       paAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
       paAudio.play().then(() => {
-        console.log("Classroom PA audio playback successfully unlocked.");
+        console.log('PA audio unlocked.');
         document.getElementById('paActivationModal').classList.add('hidden');
       }).catch(err => {
-        console.error("Error unlocking classroom PA audio:", err);
-        alert("Autoplay unlock failed. Please click the button again or refresh.");
+        console.error('Error unlocking PA audio:', err);
+        alert('Autoplay unlock failed. Please click the button again or refresh.');
       });
     }
   };
 
-  // Render correct Intercom controls based on role
+  // Render intercom controls based on role
   const intercomWidget = document.getElementById('intercomWidget');
   const intercomSenderControls = document.getElementById('intercomSenderControls');
   const intercomReceiverStatus = document.getElementById('intercomReceiverStatus');
