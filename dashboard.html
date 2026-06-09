@@ -26,6 +26,9 @@
       <a href="#" class="nav-item" data-view="students" id="navStudents">
         <span class="nav-icon">👥</span> Students
       </a>
+      <a href="#" class="nav-item" data-view="infoboard" id="navInfoBoard">
+        <span class="nav-icon">📖</span> Info Board
+      </a>
 
       <a href="#" class="nav-item" id="navAdmin" style="display:none" data-view="admin">
         <span class="nav-icon">⚙️</span> Admin
@@ -103,6 +106,11 @@
 
       <div class="calendar-grid" id="calendarGrid">
         <!-- Rendered by JS -->
+      </div>
+
+      <!-- Upcoming Free Sessions strip -->
+      <div class="upcoming-free-strip">
+        <div id="upcomingFreePanel"></div>
       </div>
 
       <!-- Class Seating Overview -->
@@ -214,6 +222,34 @@
       </div>
     </section>
           <p class="sub">Students are managed directly within their class time slots on the calendar.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- INFO BOARD VIEW -->
+    <section id="viewInfoboard" class="view">
+      <div class="view-header">
+        <div>
+          <h1>Info Board</h1>
+          <p class="view-sub">Class updates, FAQs and answers for front desk</p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-primary" id="newTopicBtn" onclick="openNewTopicModal()" style="display:none;">+ New Topic</button>
+          <button class="btn-ghost" id="askQuestionBtn" onclick="openAskQuestionModal()" style="display:none;">❓ Ask a Question</button>
+        </div>
+      </div>
+      <div class="infoboard-layout">
+        <!-- Left: Topic list -->
+        <div class="infoboard-topics" id="infoBoardTopicList">
+          <div class="empty-state">Loading topics...</div>
+        </div>
+        <!-- Right: Topic detail -->
+        <div class="infoboard-detail" id="infoBoardDetail">
+          <div class="infoboard-placeholder">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">📖</div>
+            <h3>Select a Topic</h3>
+            <p class="sub">Choose a topic from the left to read updates, FAQs and answers.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -399,6 +435,81 @@
         <button class="btn-primary full" id="btnActivatePA" onclick="activatePAAudio()" style="font-size: 1.1rem; padding: 12px 24px; border-radius: 8px;">
           🔊 Enable School PA System
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info Board: New Topic Modal -->
+  <div id="newTopicModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <h2>Create New Topic</h2>
+        <button class="modal-close" onclick="closeNewTopicModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Topic Title</label>
+          <input type="text" id="newTopicTitle" placeholder="e.g. Term 3 Explorer Schedule" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="newTopicDesc" rows="3" placeholder="Brief overview of what this topic covers..."></textarea>
+        </div>
+        <div id="newTopicError" class="error-msg hidden">Please enter a title.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closeNewTopicModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveNewTopic()">Create Topic</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info Board: Post to Topic Modal -->
+  <div id="postToTopicModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <h2>Add Information</h2>
+        <button class="modal-close" onclick="closePostModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="sub" style="margin-bottom:1rem;">Post helpful information, updates or answers to this topic.</p>
+        <div class="form-group">
+          <label>Your Message</label>
+          <textarea id="postTopicContent" rows="5" placeholder="e.g. During the June holidays we will run special 2-hour Explorer workshops..."></textarea>
+        </div>
+        <div id="postTopicError" class="error-msg hidden">Please enter some content.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closePostModal()">Cancel</button>
+        <button class="btn-primary" onclick="submitTopicPost()">Post</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info Board: Ask a Question Modal -->
+  <div id="askQuestionModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <h2>Ask a Question</h2>
+        <button class="modal-close" onclick="closeAskModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="sub" style="margin-bottom:1rem;">Post a question that customers commonly ask. Teachers will be able to answer it here.</p>
+        <div class="form-group">
+          <label>Topic</label>
+          <select id="askQuestionTopicSel">
+            <option value="">— Select a topic —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Your Question</label>
+          <textarea id="askQuestionContent" rows="4" placeholder="e.g. What happens to Explorer classes during school holidays?"></textarea>
+        </div>
+        <div id="askQuestionError" class="error-msg hidden">Please select a topic and enter your question.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closeAskModal()">Cancel</button>
+        <button class="btn-primary" onclick="submitQuestion()">Submit Question</button>
       </div>
     </div>
   </div>

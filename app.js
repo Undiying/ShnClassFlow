@@ -420,6 +420,7 @@ if (isDashboard) {
       if (view === 'bookings') renderBookingsList();
       if (view === 'admin') renderAdminPanel();
       if (view === 'students') renderGlobalStudentsList();
+      if (view === 'infoboard') renderInfoBoard();
     });
   });
 
@@ -815,7 +816,12 @@ if (isDashboard) {
             }
             return s.date === ds;
           }))
-          .sort((a, b) => a.time.localeCompare(b.time));
+          .sort((a, b) => {
+            // Free sessions always float to the top regardless of time
+            if (a.classType === 'Free' && b.classType !== 'Free') return -1;
+            if (b.classType === 'Free' && a.classType !== 'Free') return 1;
+            return a.time.localeCompare(b.time);
+          });
 
         const isToday = ds === today;
         const isPast = ds < today;
@@ -837,7 +843,49 @@ if (isDashboard) {
       }).join('');
 
       renderClassOverview(sessions);
+      renderUpcomingFreeSessions(sessions);
     });
+  }
+
+  function renderUpcomingFreeSessions(sessions) {
+    const container = document.getElementById('upcomingFreePanel');
+    if (!container) return;
+
+    const today = dateToStr(new Date());
+    const now = new Date();
+    // Collect all free sessions this month (one-off) or recurring this week
+    const weekStart = dateToStr(currentWeekMonday);
+    const weekEnd = new Date(currentWeekMonday);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const weekEndStr = dateToStr(weekEnd);
+
+    const freeSessions = sessions.filter(s => {
+      if (s.classType !== 'Free') return false;
+      if (s.isRecurring) return true; // recurring free sessions show always
+      return s.date >= today; // upcoming one-off free sessions
+    });
+
+    if (freeSessions.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const chips = freeSessions.slice(0, 8).map(s => {
+      let label;
+      if (s.isRecurring) {
+        label = `${days[s.dayOfWeek]} @ ${formatTime(s.time)}`;
+      } else {
+        label = `${formatDate(s.date)} @ ${formatTime(s.time)}`;
+      }
+      const enrolled = s.students ? s.students.length : 0;
+      return `<span class="upcoming-free-chip" onclick="openDetailModal('${s.id}')" title="Click to view details">🟠 ${label} · ${enrolled} student${enrolled !== 1 ? 's' : ''}</span>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="upcoming-free-header">📅 Free Sessions this week/upcoming</div>
+      <div class="upcoming-free-list">${chips}</div>
+    `;
   }
 
   function renderClassOverview(allSessions) {
@@ -908,9 +956,10 @@ if (isDashboard) {
     const isRecurring = s.isRecurring;
 
     const typeClass = s.classType || 'Free';
+    const isFreeSession = typeClass === 'Free';
 
     return `
-      <div class="session-card slim ${full ? 'full' : ''} ${isRecurring ? 'recurring' : 'one-off'}" onclick="openDetailModal('${s.id}')">
+      <div class="session-card slim ${full ? 'full' : ''} ${isRecurring ? 'recurring' : 'one-off'} ${isFreeSession ? 'free-session' : ''}" onclick="openDetailModal('${s.id}')">
         <div class="session-type-badge ${typeClass}">${typeClass}</div>
         <div class="session-time" style="margin-top:6px; font-weight:500;">${formatTime(s.time)} – ${formatTime(endTime)}</div>
       </div>
@@ -2025,6 +2074,248 @@ if (isDashboard) {
   renderLatestMessage();
   renderCalendar();
 
+  // ── INFO BOARD ───────────────────────────────────────────────────
+
+  // Show role-specific Info Board buttons
+  const canCreateTopic = user.role === 'teacher' || user.role === 'admin';
+  const canAskQuestion = user.role === 'frontdesk' || user.role === 'admin';
+  const newTopicBtn = document.getElementById('newTopicBtn');
+  const askQuestionBtn = document.getElementById('askQuestionBtn');
+  if (newTopicBtn && canCreateTopic) newTopicBtn.style.display = 'inline-flex';
+  if (askQuestionBtn && canAskQuestion) askQuestionBtn.style.display = 'inline-flex';
+
+  async function getInfoTopics() {
+    if (!sb || SUPABASE_URL.includes('YOUR')) {
+      const raw = localStorage.getItem('cf_info_topics');
+      return raw ? JSON.parse(raw) : [];
+    }
+    try {
+      const { data, error } = await sb.from('info_topics').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      const raw = localStorage.getItem('cf_info_topics');
+      return raw ? JSON.parse(raw) : [];
+    }
+  }
+
+  async function saveInfoTopic(topic) {
+    const topics = await getInfoTopics();
+    const idx = topics.findIndex(t => t.id === topic.id);
+    if (idx >= 0) topics[idx] = topic; else topics.unshift(topic);
+    localStorage.setItem('cf_info_topics', JSON.stringify(topics));
+    if (!sb || SUPABASE_URL.includes('YOUR')) return;
+    try { await sb.from('info_topics').upsert(topic); } catch (e) { console.warn('saveInfoTopic error:', e); }
+  }
+
+  async function getInfoPosts(topicId) {
+    if (!sb || SUPABASE_URL.includes('YOUR')) {
+      const raw = localStorage.getItem(`cf_info_posts_${topicId}`);
+      return raw ? JSON.parse(raw) : [];
+    }
+    try {
+      const { data, error } = await sb.from('info_posts').select('*').eq('topic_id', topicId).order('created_at', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      const raw = localStorage.getItem(`cf_info_posts_${topicId}`);
+      return raw ? JSON.parse(raw) : [];
+    }
+  }
+
+  async function saveInfoPost(post) {
+    const posts = await getInfoPosts(post.topic_id);
+    posts.push(post);
+    localStorage.setItem(`cf_info_posts_${post.topic_id}`, JSON.stringify(posts));
+    if (!sb || SUPABASE_URL.includes('YOUR')) return;
+    try { await sb.from('info_posts').insert(post); } catch (e) { console.warn('saveInfoPost error:', e); }
+  }
+
+  let currentTopicId = null;
+
+  async function renderInfoBoard() {
+    const topics = await getInfoTopics();
+    const listEl = document.getElementById('infoBoardTopicList');
+    if (!listEl) return;
+
+    if (topics.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <div style="font-size:2rem; margin-bottom:0.5rem;">📋</div>
+          <p>No topics yet.</p>
+          ${canCreateTopic ? '<p class="sub">Click "+ New Topic" to get started.</p>' : '<p class="sub">Teachers will add topics here soon.</p>'}
+        </div>`;
+      return;
+    }
+
+    listEl.innerHTML = topics.map(t => `
+      <div class="topic-list-item ${currentTopicId === t.id ? 'active' : ''}" onclick="selectTopic('${t.id}')">
+        <div class="topic-list-title">${t.title}</div>
+        <div class="topic-list-meta">${t.author_name || 'Teacher'} &nbsp;·&nbsp; ${new Date(t.created_at).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' })}</div>
+        ${t.description ? `<div class="topic-list-desc">${t.description}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
+  window.selectTopic = async function(topicId) {
+    currentTopicId = topicId;
+    await renderInfoBoard(); // Re-render topic list to update active state
+
+    const topics = await getInfoTopics();
+    const topic = topics.find(t => t.id === topicId);
+    const posts = await getInfoPosts(topicId);
+
+    const detailEl = document.getElementById('infoBoardDetail');
+    if (!detailEl || !topic) return;
+
+    const canPost = canCreateTopic;
+    const canAnswer = canCreateTopic;
+
+    const postsHtml = posts.length === 0
+      ? '<p class="sub" style="padding: 1rem 0;">No posts or questions yet in this topic.</p>'
+      : posts.map(p => {
+          const isQuestion = p.is_question;
+          const timeStr = new Date(p.created_at).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' }) +
+                          ' @ ' + new Date(p.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+          return `
+            <div class="post-bubble ${isQuestion ? 'question' : 'info'}">
+              <div class="post-bubble-header">
+                ${isQuestion ? '<span class="question-badge">❓ Question</span>' : '<span class="info-badge">📌 Info</span>'}
+                <span class="post-meta">${p.author_name || 'Staff'} &nbsp;·&nbsp; ${timeStr}</span>
+              </div>
+              <div class="post-body">${p.content.replace(/\n/g, '<br>')}</div>
+              ${isQuestion && canAnswer ? `
+                <div style="margin-top:8px;">
+                  <button class="btn-ghost small" onclick="openAnswerModal('${topicId}', '${p.id}')">✏️ Answer this</button>
+                </div>` : ''}
+            </div>
+          `;
+        }).join('');
+
+    detailEl.innerHTML = `
+      <div class="topic-detail-header">
+        <div>
+          <h2 class="topic-detail-title">${topic.title}</h2>
+          ${topic.description ? `<p class="view-sub">${topic.description}</p>` : ''}
+          <p class="sub" style="font-size:11px; margin-top:4px;">Created by ${topic.author_name || 'Teacher'}</p>
+        </div>
+        ${canPost ? `<button class="btn-ghost small" onclick="openPostModal('${topicId}')">📎 Post Update</button>` : ''}
+      </div>
+      <div class="posts-thread">${postsHtml}</div>
+    `;
+  };
+
+  // ── Topic Modals ─────────────────────────────────────────────────
+
+  window.openNewTopicModal = function() {
+    document.getElementById('newTopicTitle').value = '';
+    document.getElementById('newTopicDesc').value = '';
+    document.getElementById('newTopicError').classList.add('hidden');
+    document.getElementById('newTopicModal').classList.remove('hidden');
+  };
+
+  window.closeNewTopicModal = function() {
+    document.getElementById('newTopicModal').classList.add('hidden');
+  };
+
+  window.saveNewTopic = async function() {
+    const title = document.getElementById('newTopicTitle').value.trim();
+    const desc = document.getElementById('newTopicDesc').value.trim();
+    if (!title) {
+      document.getElementById('newTopicError').classList.remove('hidden');
+      return;
+    }
+    const topic = {
+      id: 'tp_' + Math.random().toString(36).substr(2, 9),
+      title,
+      description: desc || null,
+      author_id: user.id,
+      author_name: user.name,
+      created_at: new Date().toISOString()
+    };
+    await saveInfoTopic(topic);
+    closeNewTopicModal();
+    await renderInfoBoard();
+    selectTopic(topic.id);
+  };
+
+  let _postTargetTopicId = null;
+
+  window.openPostModal = function(topicId) {
+    _postTargetTopicId = topicId;
+    document.getElementById('postTopicContent').value = '';
+    document.getElementById('postTopicError').classList.add('hidden');
+    document.getElementById('postToTopicModal').classList.remove('hidden');
+  };
+
+  window.closePostModal = function() {
+    document.getElementById('postToTopicModal').classList.add('hidden');
+  };
+
+  window.submitTopicPost = async function() {
+    const content = document.getElementById('postTopicContent').value.trim();
+    if (!content) {
+      document.getElementById('postTopicError').classList.remove('hidden');
+      return;
+    }
+    const post = {
+      id: 'po_' + Math.random().toString(36).substr(2, 9),
+      topic_id: _postTargetTopicId,
+      content,
+      author_id: user.id,
+      author_name: user.name,
+      author_role: user.role,
+      is_question: false,
+      created_at: new Date().toISOString()
+    };
+    await saveInfoPost(post);
+    closePostModal();
+    if (currentTopicId === _postTargetTopicId) selectTopic(_postTargetTopicId);
+  };
+
+  window.openAskQuestionModal = async function() {
+    // Populate topic dropdown
+    const topics = await getInfoTopics();
+    const sel = document.getElementById('askQuestionTopicSel');
+    sel.innerHTML = '<option value="">— Select a topic —</option>' +
+      topics.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
+    document.getElementById('askQuestionContent').value = '';
+    document.getElementById('askQuestionError').classList.add('hidden');
+    document.getElementById('askQuestionModal').classList.remove('hidden');
+  };
+
+  window.closeAskModal = function() {
+    document.getElementById('askQuestionModal').classList.add('hidden');
+  };
+
+  window.submitQuestion = async function() {
+    const topicId = document.getElementById('askQuestionTopicSel').value;
+    const content = document.getElementById('askQuestionContent').value.trim();
+    if (!topicId || !content) {
+      document.getElementById('askQuestionError').classList.remove('hidden');
+      return;
+    }
+    const post = {
+      id: 'q_' + Math.random().toString(36).substr(2, 9),
+      topic_id: topicId,
+      content,
+      author_id: user.id,
+      author_name: user.name,
+      author_role: user.role,
+      is_question: true,
+      created_at: new Date().toISOString()
+    };
+    await saveInfoPost(post);
+    closeAskModal();
+    if (currentTopicId === topicId) selectTopic(topicId);
+  };
+
+  // Answer a question — teachers can click "Answer this" to post a reply
+  window.openAnswerModal = function(topicId, questionPostId) {
+    openPostModal(topicId);
+    document.getElementById('postTopicContent').placeholder = 'Type your answer here...';
+  };
+
   // ── Notification Utilities ───────────────────────────────────────
   let _titleBlinkInterval = null;
   const _originalTitle = document.title;
@@ -2169,6 +2460,10 @@ if (isDashboard) {
   let currentReplyChannel = null; // per-call back-channel on receiver side
   let replyChannelReady = false;
   let replyIceBuffer = [];
+
+  // Track whether the user has already clicked "Enable PA System" — prevents
+  // the activation modal from re-appearing on channel reconnects.
+  let paAudioActivated = false;
 
   const stunConfig = {
     iceServers: [
@@ -2371,7 +2666,11 @@ if (isDashboard) {
   function initPAReceiver() {
     if (user.role !== 'class' && user.role !== 'frontdesk' && user.role !== 'admin') return;
 
-    document.getElementById('paActivationModal').classList.remove('hidden');
+    // Only show the audio activation modal if the user hasn't already unlocked it.
+    // This prevents the popup from re-appearing on every channel reconnect.
+    if (!paAudioActivated) {
+      document.getElementById('paActivationModal').classList.remove('hidden');
+    }
 
     const mySlug = (user.role === 'frontdesk' ? 'Front Desk' : user.name)
       .toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -2561,6 +2860,7 @@ if (isDashboard) {
       paAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
       paAudio.play().then(() => {
         console.log('PA audio unlocked.');
+        paAudioActivated = true; // Mark as activated so the modal never re-appears
         document.getElementById('paActivationModal').classList.add('hidden');
       }).catch(err => {
         console.error('Error unlocking PA audio:', err);
