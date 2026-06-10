@@ -2174,50 +2174,77 @@ if (isDashboard) {
   if (askQuestionBtn && canAskQuestion) askQuestionBtn.style.display = 'inline-flex';
 
   async function getInfoTopics() {
+    // Always read from localStorage first as the primary cache
+    const raw = localStorage.getItem('cf_info_topics');
+    const localTopics = raw ? JSON.parse(raw) : [];
+
     if (!sb || SUPABASE_URL.includes('YOUR')) {
-      const raw = localStorage.getItem('cf_info_topics');
-      return raw ? JSON.parse(raw) : [];
+      return localTopics;
     }
     try {
       const { data, error } = await sb.from('info_topics').select('*').order('created_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+      const remoteTopics = data || [];
+      // Merge: local-only items (not yet synced or Supabase-blocked) + remote items
+      const remoteIds = new Set(remoteTopics.map(t => t.id));
+      const localOnly = localTopics.filter(t => !remoteIds.has(t.id));
+      const merged = [...localOnly, ...remoteTopics];
+      // Update local cache with merged result
+      localStorage.setItem('cf_info_topics', JSON.stringify(merged));
+      return merged;
     } catch (e) {
-      const raw = localStorage.getItem('cf_info_topics');
-      return raw ? JSON.parse(raw) : [];
+      console.warn('getInfoTopics Supabase error, using local cache:', e);
+      return localTopics;
     }
   }
 
   async function saveInfoTopic(topic) {
-    const topics = await getInfoTopics();
+    // Always write to localStorage first
+    const raw = localStorage.getItem('cf_info_topics');
+    const topics = raw ? JSON.parse(raw) : [];
     const idx = topics.findIndex(t => t.id === topic.id);
     if (idx >= 0) topics[idx] = topic; else topics.unshift(topic);
     localStorage.setItem('cf_info_topics', JSON.stringify(topics));
+    // Attempt Supabase sync (non-blocking, failure is OK)
     if (!sb || SUPABASE_URL.includes('YOUR')) return;
-    try { await sb.from('info_topics').upsert(topic); } catch (e) { console.warn('saveInfoTopic error:', e); }
+    try { await sb.from('info_topics').upsert(topic); } catch (e) { console.warn('saveInfoTopic Supabase sync error (data saved locally):', e); }
   }
 
   async function getInfoPosts(topicId) {
+    // Always read from localStorage first as the primary cache
+    const raw = localStorage.getItem(`cf_info_posts_${topicId}`);
+    const localPosts = raw ? JSON.parse(raw) : [];
+
     if (!sb || SUPABASE_URL.includes('YOUR')) {
-      const raw = localStorage.getItem(`cf_info_posts_${topicId}`);
-      return raw ? JSON.parse(raw) : [];
+      return localPosts;
     }
     try {
       const { data, error } = await sb.from('info_posts').select('*').eq('topic_id', topicId).order('created_at', { ascending: true });
       if (error) throw error;
-      return data || [];
+      const remotePosts = data || [];
+      // Merge: local-only posts + remote posts
+      const remoteIds = new Set(remotePosts.map(p => p.id));
+      const localOnly = localPosts.filter(p => !remoteIds.has(p.id));
+      const merged = [...remotePosts, ...localOnly].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // Update local cache
+      localStorage.setItem(`cf_info_posts_${topicId}`, JSON.stringify(merged));
+      return merged;
     } catch (e) {
-      const raw = localStorage.getItem(`cf_info_posts_${topicId}`);
-      return raw ? JSON.parse(raw) : [];
+      console.warn('getInfoPosts Supabase error, using local cache:', e);
+      return localPosts;
     }
   }
 
   async function saveInfoPost(post) {
-    const posts = await getInfoPosts(post.topic_id);
-    posts.push(post);
+    // Always write to localStorage first
+    const raw = localStorage.getItem(`cf_info_posts_${post.topic_id}`);
+    const posts = raw ? JSON.parse(raw) : [];
+    // Avoid duplicates
+    if (!posts.find(p => p.id === post.id)) posts.push(post);
     localStorage.setItem(`cf_info_posts_${post.topic_id}`, JSON.stringify(posts));
+    // Attempt Supabase sync (non-blocking, failure is OK)
     if (!sb || SUPABASE_URL.includes('YOUR')) return;
-    try { await sb.from('info_posts').insert(post); } catch (e) { console.warn('saveInfoPost error:', e); }
+    try { await sb.from('info_posts').insert(post); } catch (e) { console.warn('saveInfoPost Supabase sync error (data saved locally):', e); }
   }
 
   let currentTopicId = null;
@@ -2321,6 +2348,7 @@ if (isDashboard) {
   window.deleteTopic = async function(topicId) {
     if (!confirm('Are you sure you want to delete this topic and all its posts?')) return;
     
+    // Remove from localStorage
     const rawTopics = localStorage.getItem('cf_info_topics');
     if (rawTopics) {
       let topics = JSON.parse(rawTopics);
@@ -2329,8 +2357,12 @@ if (isDashboard) {
     }
     localStorage.removeItem(`cf_info_posts_${topicId}`);
 
+    // Attempt Supabase delete (non-blocking)
     if (sb && !SUPABASE_URL.includes('YOUR')) {
-      await sb.from('info_topics').delete().eq('id', topicId);
+      try {
+        await sb.from('info_posts').delete().eq('topic_id', topicId);
+        await sb.from('info_topics').delete().eq('id', topicId);
+      } catch (e) { console.warn('deleteTopic Supabase error (removed locally):', e); }
     }
     
     if (currentTopicId === topicId) currentTopicId = 'general';
@@ -2339,7 +2371,9 @@ if (isDashboard) {
   };
 
   window.editTopic = async function(topicId) {
-    const topics = await getInfoTopics();
+    // Read from local cache directly to avoid Supabase-only lookup
+    const raw = localStorage.getItem('cf_info_topics');
+    const topics = raw ? JSON.parse(raw) : [];
     const topic = topics.find(t => t.id === topicId);
     if (!topic) return;
 
@@ -2359,6 +2393,7 @@ if (isDashboard) {
   window.deletePost = async function(topicId, postId) {
     if (!confirm('Are you sure you want to delete this post?')) return;
 
+    // Remove from localStorage first
     const rawPosts = localStorage.getItem(`cf_info_posts_${topicId}`);
     if (rawPosts) {
       let posts = JSON.parse(rawPosts);
@@ -2366,15 +2401,19 @@ if (isDashboard) {
       localStorage.setItem(`cf_info_posts_${topicId}`, JSON.stringify(posts));
     }
 
+    // Attempt Supabase delete (non-blocking)
     if (sb && !SUPABASE_URL.includes('YOUR')) {
-      await sb.from('info_posts').delete().eq('id', postId);
+      try { await sb.from('info_posts').delete().eq('id', postId); }
+      catch (e) { console.warn('deletePost Supabase error (removed locally):', e); }
     }
 
     selectTopic(topicId);
   };
 
   window.editPost = async function(topicId, postId) {
-    const posts = await getInfoPosts(topicId);
+    // Read from localStorage directly
+    const rawPosts = localStorage.getItem(`cf_info_posts_${topicId}`);
+    const posts = rawPosts ? JSON.parse(rawPosts) : [];
     const post = posts.find(p => p.id === postId);
     if (!post) return;
 
@@ -2382,17 +2421,16 @@ if (isDashboard) {
     if (!newContent) return;
 
     post.content = newContent;
-    
-    const rawPosts = localStorage.getItem(`cf_info_posts_${topicId}`);
-    if (rawPosts) {
-      let allPosts = JSON.parse(rawPosts);
-      const idx = allPosts.findIndex(p => p.id === postId);
-      if (idx !== -1) allPosts[idx] = post;
-      localStorage.setItem(`cf_info_posts_${topicId}`, JSON.stringify(allPosts));
-    }
 
+    // Update localStorage first
+    const idx = posts.findIndex(p => p.id === postId);
+    if (idx !== -1) posts[idx] = post;
+    localStorage.setItem(`cf_info_posts_${topicId}`, JSON.stringify(posts));
+
+    // Attempt Supabase sync (non-blocking)
     if (sb && !SUPABASE_URL.includes('YOUR')) {
-      await sb.from('info_posts').update({ content: newContent }).eq('id', postId);
+      try { await sb.from('info_posts').update({ content: newContent }).eq('id', postId); }
+      catch (e) { console.warn('editPost Supabase sync error (saved locally):', e); }
     }
 
     selectTopic(topicId);
