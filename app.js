@@ -981,8 +981,7 @@ if (isDashboard) {
     const allUsers = await getUsers();
     // Include admins and teachers in the teacher/assignee dropdown
     const assignable = allUsers.filter(u => u.role === 'teacher' || u.role === 'admin');
-    const teacherOptions = '<option value="">— Select teacher —</option>' +
-      assignable.map(t => `<option value="${t.id}" ${t.id === user.id ? 'selected' : ''}>${t.name}</option>`).join('');
+    const teacherOptions = assignable.map(t => `<option value="${t.id}" ${t.id === user.id ? 'selected' : ''}>${t.name}</option>`).join('');
 
     const body = document.getElementById('bookingModalBody');
 
@@ -1061,8 +1060,8 @@ if (isDashboard) {
           <input type="text" id="eventDescription" placeholder="e.g. Staff Training, Parent Meeting" style="display:none" />
         </div>
         <div class="form-group">
-          <label>Assign Teacher</label>
-          <select id="sessionTeacher">${teacherOptions}</select>
+          <label>Assign Teacher(s)</label>
+          <select id="sessionTeacher" multiple style="height: 80px; padding: 4px;">${teacherOptions}</select>
         </div>
         <div class="form-group">
           <label>Notes</label>
@@ -1143,8 +1142,8 @@ if (isDashboard) {
           </div>
         </div>
         <div class="form-group">
-          <label>Assign Teacher</label>
-          <select id="sessionTeacher">${teacherOptions}</select>
+          <label>Assign Teacher(s)</label>
+          <select id="sessionTeacher" multiple style="height: 80px; padding: 4px;">${teacherOptions}</select>
         </div>
         <div class="form-group">
           <label>Notes</label>
@@ -1376,7 +1375,8 @@ if (isDashboard) {
     const isTeacher = user.role === 'teacher';
     const classType = document.getElementById('classType').value;
     const isEvent = classType === 'Event';
-    const teacherId = document.getElementById('sessionTeacher').value;
+    const teacherSelect = document.getElementById('sessionTeacher');
+    const teacherIds = teacherSelect ? Array.from(teacherSelect.selectedOptions).map(opt => opt.value).filter(v => v) : [];
     const notes = (document.getElementById('sessionNotes')?.value || '').trim();
     const errEl = document.getElementById('bookingError');
 
@@ -1441,8 +1441,8 @@ if (isDashboard) {
     }
 
     const allUsers = await getUsers();
-    const teacherName = teacherId
-      ? allUsers.find(u => u.id === teacherId)?.name || ''
+    const teacherName = teacherIds.length > 0
+      ? teacherIds.map(id => allUsers.find(u => u.id === id)?.name).filter(n => n).join(', ')
       : '';
 
     const session = {
@@ -1455,7 +1455,8 @@ if (isDashboard) {
       duration,
       name,
       maxStudents: isEvent ? 0 : 8,
-      teacherId,
+      teacherId: teacherIds.join(','),
+      teacherIds: teacherIds,
       teacherName,
       notes,
       students: isEvent ? [] : (isTeacher ? [...pendingStudents] : collectFreeStudents()),
@@ -1582,9 +1583,10 @@ if (isDashboard) {
 
     const allUsers = await getUsers();
     const assignable = allUsers.filter(u => u.role === 'teacher' || u.role === 'admin');
-    const teacherOptions = assignable.map(t => 
-      `<option value="${t.id}" ${t.id === s.teacherId ? 'selected' : ''}>${t.name}</option>`
-    ).join('');
+    const teacherOptions = assignable.map(t => {
+      const isSelected = s.teacherIds ? s.teacherIds.includes(t.id) : (s.teacherId && s.teacherId.includes(t.id));
+      return `<option value="${t.id}" ${isSelected ? 'selected' : ''}>${t.name}</option>`;
+    }).join('');
 
     const isTeacher = user.role === 'teacher';
     const types = ['Explorer', 'Junior', 'Intro', 'Event'];
@@ -1630,9 +1632,8 @@ if (isDashboard) {
         </div>
         `}
         <div class="form-group">
-          <label>Teacher</label>
-          <select id="editTeacher">
-            <option value="">— Select teacher —</option>
+          <label>Teacher(s)</label>
+          <select id="editTeacher" multiple style="height: 80px; padding: 4px;">
             ${teacherOptions}
           </select>
         </div>
@@ -1643,7 +1644,16 @@ if (isDashboard) {
         </div>
         
         <!-- Students Section in Edit -->
-        ${s.classType === 'Event' ? '' : `
+        ${s.classType === 'Event' ? '' : s.classType === 'Free' ? `
+        <div id="freeSessionStudentsEdit">
+          <hr style="border:none; border-top:1px solid var(--border); margin:1rem 0;" />
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
+            <h4 style="font-size:0.9rem;">Students Attending</h4>
+            <button class="btn-ghost small" onclick="addFreeStudentEdit()">+ Add Student</button>
+          </div>
+          <div id="freeStudentListEdit"></div>
+        </div>
+        ` : `
         <div class="form-group">
           <label>Assign Registered Student</label>
           <div id="editStudentList" class="student-list"></div>
@@ -1661,7 +1671,9 @@ if (isDashboard) {
       </div>
     `;
 
-    if (s.classType !== 'Event') {
+    if (s.classType === 'Free') {
+      renderFreeStudentListEdit();
+    } else if (s.classType !== 'Event') {
       renderStudentListEdit();
       populateStudentDropdown('editStudentSelect');
     }
@@ -1682,7 +1694,8 @@ if (isDashboard) {
     const duration = parseInt(document.getElementById('editDuration').value);
     const maxStudentsEl = document.getElementById('editMax');
     const maxStudents = maxStudentsEl ? parseInt(maxStudentsEl.value) : 8;
-    const teacherId = document.getElementById('editTeacher').value;
+    const teacherSelect = document.getElementById('editTeacher');
+    const teacherIds = teacherSelect ? Array.from(teacherSelect.selectedOptions).map(opt => opt.value).filter(v => v) : [];
     const notes = document.getElementById('editNotes').value.trim();
 
     const errEl = document.getElementById('editError');
@@ -1699,14 +1712,23 @@ if (isDashboard) {
     if (idx === -1) return;
 
     const allUsers = await getUsers();
-    const teacherName = teacherId
-      ? allUsers.find(u => u.id === teacherId)?.name || ''
+    const teacherName = teacherIds.length > 0
+      ? teacherIds.map(id => allUsers.find(u => u.id === id)?.name).filter(n => n).join(', ')
       : '';
 
     const isTeacher = user.role === 'teacher';
     const finalDate = (isTeacher || !date) ? null : date;
     const finalClassType = document.getElementById('editClassType')?.value || sessions[idx].classType;
     const isEvent = finalClassType === 'Event';
+
+    let updatedStudents = [];
+    if (isEvent) {
+      updatedStudents = [];
+    } else if (finalClassType === 'Free') {
+      updatedStudents = collectFreeStudentsEdit();
+    } else {
+      updatedStudents = [...pendingStudents];
+    }
 
     // Update session
     sessions[idx] = {
@@ -1717,11 +1739,11 @@ if (isDashboard) {
       time,
       duration,
       maxStudents: isTeacher ? 8 : maxStudents,
-      teacherId,
-
+      teacherId: teacherIds.join(','),
+      teacherIds: teacherIds,
       teacherName,
       notes,
-      students: isEvent ? [] : [...pendingStudents]
+      students: updatedStudents
     };
 
 
@@ -1778,6 +1800,73 @@ if (isDashboard) {
         <button class="remove-btn" onclick="removeStudentEdit(${i})">✕</button>
       </div>
     `).join('');
+  }
+
+  window.addFreeStudentEdit = function() {
+    pendingStudents.push({});
+    renderFreeStudentListEdit();
+  };
+
+  window.removeFreeStudentEdit = function(idx) {
+    pendingStudents.splice(idx, 1);
+    renderFreeStudentListEdit();
+  };
+
+  function renderFreeStudentListEdit() {
+    const container = document.getElementById('freeStudentListEdit');
+    if (!container) return;
+    if (pendingStudents.length === 0) {
+      container.innerHTML = '<p class="sub">No students added yet.</p>';
+      return;
+    }
+    container.innerHTML = pendingStudents.map((st, i) => `
+      <div class="free-student-entry" style="border:1px solid var(--border); border-radius:var(--radius-sm); padding:1rem; margin-bottom:0.8rem; position:relative;">
+        <button class="remove-btn" onclick="removeFreeStudentEdit(${i})" style="position:absolute; top:8px; right:8px;">✕</button>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Student Name</label>
+            <input type="text" id="editStName_${i}" value="${st.name || ''}" placeholder="e.g. Liam Smith" />
+          </div>
+          <div class="form-group">
+            <label>Age</label>
+            <input type="number" id="editStAge_${i}" value="${st.age || ''}" min="1" max="100" placeholder="e.g. 10" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Parent Name</label>
+            <input type="text" id="editStParent_${i}" value="${st.parentName || ''}" placeholder="e.g. Michael Smith" />
+          </div>
+          <div class="form-group">
+            <label>Parent Phone</label>
+            <input type="tel" id="editStPhone_${i}" value="${st.parentPhone || ''}" placeholder="e.g. 082 123 4567" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Parent Email</label>
+          <input type="email" id="editStEmail_${i}" value="${st.parentEmail || ''}" placeholder="e.g. michael@example.com" />
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function collectFreeStudentsEdit() {
+    const results = [];
+    const entries = document.querySelectorAll('#freeStudentListEdit .free-student-entry');
+    entries.forEach((_, i) => {
+      const name = (document.getElementById(`editStName_${i}`)?.value || '').trim();
+      if (name) {
+        results.push({
+          id: pendingStudents[i]?.id || ('fs_' + Math.random().toString(36).substr(2, 6)),
+          name,
+          age: document.getElementById(`editStAge_${i}`)?.value || '',
+          parentName: document.getElementById(`editStParent_${i}`)?.value || '',
+          parentPhone: document.getElementById(`editStPhone_${i}`)?.value || '',
+          parentEmail: document.getElementById(`editStEmail_${i}`)?.value || ''
+        });
+      }
+    });
+    return results;
   }
 
   window.closeDetailModal = function () {
@@ -2140,15 +2229,26 @@ if (isDashboard) {
 
     if (topics.length === 0) {
       listEl.innerHTML = `
+        <div class="topic-list-item ${currentTopicId === 'general' ? 'active' : ''}" onclick="selectTopic('general')">
+          <div class="topic-list-title">General Questions</div>
+          <div class="topic-list-meta">System &nbsp;·&nbsp; Always open</div>
+          <div class="topic-list-desc">Questions without a specific topic</div>
+        </div>
         <div class="empty-state">
           <div style="font-size:2rem; margin-bottom:0.5rem;">📋</div>
-          <p>No topics yet.</p>
+          <p>No other topics yet.</p>
           ${canCreateTopic ? '<p class="sub">Click "+ New Topic" to get started.</p>' : '<p class="sub">Teachers will add topics here soon.</p>'}
         </div>`;
       return;
     }
 
-    listEl.innerHTML = topics.map(t => `
+    listEl.innerHTML = `
+      <div class="topic-list-item ${currentTopicId === 'general' ? 'active' : ''}" onclick="selectTopic('general')">
+        <div class="topic-list-title">General Questions</div>
+        <div class="topic-list-meta">System &nbsp;·&nbsp; Always open</div>
+        <div class="topic-list-desc">Questions without a specific topic</div>
+      </div>
+    ` + topics.map(t => `
       <div class="topic-list-item ${currentTopicId === t.id ? 'active' : ''}" onclick="selectTopic('${t.id}')">
         <div class="topic-list-title">${t.title}</div>
         <div class="topic-list-meta">${t.author_name || 'Teacher'} &nbsp;·&nbsp; ${new Date(t.created_at).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' })}</div>
@@ -2162,7 +2262,7 @@ if (isDashboard) {
     await renderInfoBoard(); // Re-render topic list to update active state
 
     const topics = await getInfoTopics();
-    const topic = topics.find(t => t.id === topicId);
+    const topic = topics.find(t => t.id === topicId) || (topicId === 'general' ? { id: 'general', title: 'General Questions', description: 'Questions without a specific topic', author_name: 'System' } : null);
     const posts = await getInfoPosts(topicId);
 
     const detailEl = document.getElementById('infoBoardDetail');
@@ -2177,6 +2277,16 @@ if (isDashboard) {
           const isQuestion = p.is_question;
           const timeStr = new Date(p.created_at).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' }) +
                           ' @ ' + new Date(p.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+          const actionButtons = [];
+          if (isQuestion && canAnswer) {
+            actionButtons.push(`<button class="btn-ghost small" onclick="openAnswerModal('${topicId}', '${p.id}')">✏️ Answer this</button>`);
+          }
+          if (user.role === 'admin' || user.role === 'teacher') {
+            actionButtons.push(`<button class="btn-ghost small" onclick="editPost('${topicId}', '${p.id}')">✏️ Edit</button>`);
+            actionButtons.push(`<button class="btn-ghost small" onclick="deletePost('${topicId}', '${p.id}')" style="color:var(--danger)">🗑️ Delete</button>`);
+          }
+          const actionsHtml = actionButtons.length > 0 ? `<div style="margin-top:8px; display:flex; gap:8px;">${actionButtons.join('')}</div>` : '';
+
           return `
             <div class="post-bubble ${isQuestion ? 'question' : 'info'}">
               <div class="post-bubble-header">
@@ -2184,10 +2294,7 @@ if (isDashboard) {
                 <span class="post-meta">${p.author_name || 'Staff'} &nbsp;·&nbsp; ${timeStr}</span>
               </div>
               <div class="post-body">${p.content.replace(/\n/g, '<br>')}</div>
-              ${isQuestion && canAnswer ? `
-                <div style="margin-top:8px;">
-                  <button class="btn-ghost small" onclick="openAnswerModal('${topicId}', '${p.id}')">✏️ Answer this</button>
-                </div>` : ''}
+              ${actionsHtml}
             </div>
           `;
         }).join('');
@@ -2199,10 +2306,96 @@ if (isDashboard) {
           ${topic.description ? `<p class="view-sub">${topic.description}</p>` : ''}
           <p class="sub" style="font-size:11px; margin-top:4px;">Created by ${topic.author_name || 'Teacher'}</p>
         </div>
-        ${canPost ? `<button class="btn-ghost small" onclick="openPostModal('${topicId}')">📎 Post Update</button>` : ''}
+        <div style="display:flex; gap:8px;">
+          ${topic.id !== 'general' && (user.role === 'admin' || user.role === 'teacher') ? `
+            <button class="btn-ghost small" onclick="editTopic('${topicId}')">✏️ Edit</button>
+            <button class="btn-ghost small" onclick="deleteTopic('${topicId}')" style="color:var(--danger)">🗑️ Delete</button>
+          ` : ''}
+          ${canPost ? `<button class="btn-ghost small" onclick="openPostModal('${topicId}')">📎 Post Update</button>` : ''}
+        </div>
       </div>
       <div class="posts-thread">${postsHtml}</div>
     `;
+  };
+
+  window.deleteTopic = async function(topicId) {
+    if (!confirm('Are you sure you want to delete this topic and all its posts?')) return;
+    
+    const rawTopics = localStorage.getItem('cf_info_topics');
+    if (rawTopics) {
+      let topics = JSON.parse(rawTopics);
+      topics = topics.filter(t => t.id !== topicId);
+      localStorage.setItem('cf_info_topics', JSON.stringify(topics));
+    }
+    localStorage.removeItem(`cf_info_posts_${topicId}`);
+
+    if (sb && !SUPABASE_URL.includes('YOUR')) {
+      await sb.from('info_topics').delete().eq('id', topicId);
+    }
+    
+    if (currentTopicId === topicId) currentTopicId = 'general';
+    await renderInfoBoard();
+    selectTopic(currentTopicId);
+  };
+
+  window.editTopic = async function(topicId) {
+    const topics = await getInfoTopics();
+    const topic = topics.find(t => t.id === topicId);
+    if (!topic) return;
+
+    const newTitle = prompt('Edit Topic Title:', topic.title);
+    if (!newTitle) return;
+    const newDesc = prompt('Edit Topic Description:', topic.description || '');
+    if (newDesc === null) return;
+
+    topic.title = newTitle;
+    topic.description = newDesc;
+    
+    await saveInfoTopic(topic);
+    await renderInfoBoard();
+    selectTopic(currentTopicId);
+  };
+
+  window.deletePost = async function(topicId, postId) {
+    if (!confirm('Are you sure you want to delete this post?')) return;
+
+    const rawPosts = localStorage.getItem(`cf_info_posts_${topicId}`);
+    if (rawPosts) {
+      let posts = JSON.parse(rawPosts);
+      posts = posts.filter(p => p.id !== postId);
+      localStorage.setItem(`cf_info_posts_${topicId}`, JSON.stringify(posts));
+    }
+
+    if (sb && !SUPABASE_URL.includes('YOUR')) {
+      await sb.from('info_posts').delete().eq('id', postId);
+    }
+
+    selectTopic(topicId);
+  };
+
+  window.editPost = async function(topicId, postId) {
+    const posts = await getInfoPosts(topicId);
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    const newContent = prompt('Edit content:', post.content);
+    if (!newContent) return;
+
+    post.content = newContent;
+    
+    const rawPosts = localStorage.getItem(`cf_info_posts_${topicId}`);
+    if (rawPosts) {
+      let allPosts = JSON.parse(rawPosts);
+      const idx = allPosts.findIndex(p => p.id === postId);
+      if (idx !== -1) allPosts[idx] = post;
+      localStorage.setItem(`cf_info_posts_${topicId}`, JSON.stringify(allPosts));
+    }
+
+    if (sb && !SUPABASE_URL.includes('YOUR')) {
+      await sb.from('info_posts').update({ content: newContent }).eq('id', postId);
+    }
+
+    selectTopic(topicId);
   };
 
   // ── Topic Modals ─────────────────────────────────────────────────
@@ -2277,7 +2470,7 @@ if (isDashboard) {
     // Populate topic dropdown
     const topics = await getInfoTopics();
     const sel = document.getElementById('askQuestionTopicSel');
-    sel.innerHTML = '<option value="">— Select a topic —</option>' +
+    sel.innerHTML = '<option value="">— Select a topic (Optional) —</option>' +
       topics.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
     document.getElementById('askQuestionContent').value = '';
     document.getElementById('askQuestionError').classList.add('hidden');
@@ -2289,11 +2482,14 @@ if (isDashboard) {
   };
 
   window.submitQuestion = async function() {
-    const topicId = document.getElementById('askQuestionTopicSel').value;
+    let topicId = document.getElementById('askQuestionTopicSel').value;
     const content = document.getElementById('askQuestionContent').value.trim();
-    if (!topicId || !content) {
+    if (!content) {
       document.getElementById('askQuestionError').classList.remove('hidden');
       return;
+    }
+    if (!topicId) {
+      topicId = 'general';
     }
     const post = {
       id: 'q_' + Math.random().toString(36).substr(2, 9),
