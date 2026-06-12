@@ -1358,6 +1358,45 @@ html, body {
   100% { box-shadow: 0 0 0 8px rgba(231, 76, 60, 0); }
 }
 
+/* Recording indicator (shown while mic is active) */
+.pa-recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(231, 76, 60, 0.1);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #e74c3c;
+}
+
+/* Send / Cancel action buttons inside the intercom widget */
+.pa-action-btn {
+  flex: 1;
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+}
+.pa-action-btn.send {
+  background: var(--accent);
+  color: #fff;
+}
+.pa-action-btn.send:hover { background: var(--accent-hover); }
+.pa-action-btn.cancel {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.pa-action-btn.cancel:hover { background: var(--danger-light); color: var(--danger); border-color: var(--danger); }
+
+
 .intercom-status-indicator {
   display: flex;
   align-items: center;

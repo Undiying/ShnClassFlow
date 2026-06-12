@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 //  ClassFlow — app.js
 //  Handles auth, state, calendar rendering, booking logic
 // ============================================================
@@ -2667,443 +2667,324 @@ if (isDashboard) {
     }
   }, 8000);
 
-  // ── WebRTC Intercom / PA System ──────────────────────────────────
+  // ── Voice Note PA System ──────────────────────────────────────────
   //
-  // Architecture:
-  //   Each call uses a freshly-generated unique "back-channel"
-  //   (intercom_back_<uuid>) so there are never channel name conflicts
-  //   between consecutive or simultaneous calls.
+  // How it works (much simpler and more reliable than WebRTC):
+  //   Sender  → taps a room button → MediaRecorder captures mic audio
+  //           → clicks Send → audio blob converted to base64 data URL
+  //           → broadcast via Supabase Realtime to target room's channel
+  //   Receiver→ listens on their personal channel (pa_msg_<slug>)
+  //           → receives audio data → auto-plays (or shows Play button)
   //
-  //   Sender  → sends OFFER to target's well-known channel (intercom_<slug>)
-  //           → listens on its unique back-channel for ANSWER + ICE
-  //   Receiver→ receives OFFER on its well-known channel
-  //           → subscribes to the back-channel provided in offer.replyTo
-  //           → sends ANSWER + ICE on that back-channel
-  //           → receives HANGUP on that back-channel
-  //
-  let paLocalStream = null;
-  let paPeerConnection = null;
-  let paBackChannel = null;   // sender's unique back-channel
-  let paOfferChannel = null;  // temporary channel used only to deliver the offer
-  let activePAClass = null;
-  let paSenderIceBuffer = [];
-  let paBackReady = false;
+  // No ICE/STUN/TURN, no peer connections, no timing races. Just works.
 
-  let incomingPeerConnection = null;
-  let paReceiverChannel = null;  // well-known receiver channel (persistent)
-  let currentReplyChannel = null; // per-call back-channel on receiver side
-  let replyChannelReady = false;
-  let replyIceBuffer = [];
+  let paRecorder = null;
+  let paChunks = [];
+  let paTargetClass = null;
+  let paRecording = false;
+  let paRecordingTimer = null;
+  let paRecordingSeconds = 0;
+  let paReceiverChannel = null;
+  let pendingPAData = null;  // holds audio data URL if autoplay is blocked
+  let paCurrentAudio = null; // active Audio() object so we can track playback
 
-  // Track whether the user has already clicked "Enable PA System" — prevents
-  // the activation modal from re-appearing on channel reconnects.
-  let paAudioActivated = false;
+  // ── Sender Side ─────────────────────────────────────────────────
 
-  const stunConfig = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-    ]
-  };
-
-  window.togglePA = async function(className) {
-    if (activePAClass) {
-      if (activePAClass === className) {
-        await stopPA();
-      } else {
-        await stopPA();
-        // Allow Supabase to fully close old channels before opening new ones
-        await new Promise(r => setTimeout(r, 350));
-        await startPA(className);
-      }
-    } else {
-      await startPA(className);
+  window.startPARecording = async function(className) {
+    // If already recording for this same room, treat as cancel
+    if (paRecording && paTargetClass === className) {
+      cancelPARecording();
+      return;
     }
-  };
+    // Cancel any prior recording before starting a new one
+    if (paRecording) cancelPARecording();
 
-  async function startPA(className) {
-    console.log(`Starting PA to ${className}...`);
-    activePAClass = className;
-    updateSenderIntercomUI();
-    paSenderIceBuffer = [];
-    paBackReady = false;
-
-    const targetSlug = className.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    // Unique session ID ensures no channel-name collisions across calls
-    const sessionId = `${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const backChannelName = `intercom_back_${sessionId}`;
+    paTargetClass = className;
+    paChunks = [];
+    paRecordingSeconds = 0;
 
     try {
-      paLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
 
-      // 1. Subscribe to the unique back-channel to receive answer + ICE from receiver
-      paBackChannel = sb.channel(backChannelName, {
-        config: { broadcast: { self: false } }
-      });
+      // Pick the best supported audio format (smallest/best quality = Opus)
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+        .find(m => MediaRecorder.isTypeSupported(m)) || '';
 
-      paBackChannel
-        .on('broadcast', { event: 'answer' }, async ({ payload }) => {
-          console.log('Answer received from receiver');
-          if (paPeerConnection && paPeerConnection.signalingState !== 'stable') {
-            try {
-              await paPeerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-              const statusEl = document.getElementById('intercomStatus');
-              if (statusEl) statusEl.textContent = `Connected to ${className} ✓`;
-            } catch (e) { console.error('setRemoteDescription failed:', e); }
-          }
-        })
-        .on('broadcast', { event: 'candidate' }, async ({ payload }) => {
-          if (paPeerConnection && payload.candidate) {
-            try {
-              await paPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
-            } catch (e) { console.error('addIceCandidate (receiver→sender) failed:', e); }
-          }
-        })
-        .subscribe(async (status) => {
-          if (status !== 'SUBSCRIBED') return;
-          paBackReady = true;
-          console.log(`Back-channel ${backChannelName} ready`);
+      paRecorder = new MediaRecorder(stream, { mimeType: mimeType || undefined, audioBitsPerSecond: 24000 });
+      paRecorder.ondataavailable = e => { if (e.data.size > 0) paChunks.push(e.data); };
+      paRecorder.onstop = () => stream.getTracks().forEach(t => t.stop());
 
-          // 2. Create peer connection
-          paPeerConnection = new RTCPeerConnection(stunConfig);
-          paLocalStream.getTracks().forEach(t => paPeerConnection.addTrack(t, paLocalStream));
+      paRecorder.start(100); // collect data chunk every 100ms
+      paRecording = true;
+      _updateSenderUI();
 
-          paPeerConnection.onicecandidate = (event) => {
-            if (!event.candidate) return;
-            const msg = { type: 'broadcast', event: 'sender_candidate', payload: { candidate: event.candidate } };
-            if (paBackReady && paBackChannel) {
-              paBackChannel.send(msg);
-            } else {
-              paSenderIceBuffer.push(event.candidate);
-            }
-          };
-
-          paPeerConnection.onconnectionstatechange = () => {
-            const s = paPeerConnection?.connectionState;
-            console.log('Sender WebRTC state:', s);
-            if (s === 'failed') stopPA();
-          };
-
-          // 3. Create offer
-          const offer = await paPeerConnection.createOffer();
-          await paPeerConnection.setLocalDescription(offer);
-          const myName = user.role === 'frontdesk' ? 'Front Desk' : user.name;
-
-          // 4. Deliver offer via the target's well-known receiver channel
-          //    We only subscribe long enough to fire the offer, then let it persist
-          //    (Supabase broadcast is fire-and-forget; the channel is cleaned in stopPA)
-          paOfferChannel = sb.channel(`intercom_${targetSlug}`, {
-            config: { broadcast: { self: false } }
-          });
-          paOfferChannel.subscribe(async (offerStatus) => {
-            if (offerStatus !== 'SUBSCRIBED') return;
-            await paOfferChannel.send({
-              type: 'broadcast',
-              event: 'offer',
-              payload: { sdp: offer, senderName: myName, replyTo: backChannelName }
-            });
-            console.log(`Offer sent to ${className} via intercom_${targetSlug}`);
-            const statusEl = document.getElementById('intercomStatus');
-            if (statusEl) statusEl.textContent = `Calling ${className}...`;
-          });
-
-          // Flush any ICE candidates gathered before back-channel was confirmed ready
-          for (const candidate of paSenderIceBuffer) {
-            paBackChannel.send({ type: 'broadcast', event: 'sender_candidate', payload: { candidate } });
-          }
-          paSenderIceBuffer = [];
-        });
+      // Running timer display
+      paRecordingTimer = setInterval(() => {
+        paRecordingSeconds++;
+        const timerEl = document.getElementById('paRecordingTimer');
+        if (timerEl) timerEl.textContent = `🎙 Recording to ${className}… ${paRecordingSeconds}s`;
+        if (paRecordingSeconds >= 30) stopAndSendPA(); // hard cap at 30s
+      }, 1000);
 
     } catch (err) {
-      console.error('Error starting PA system:', err);
-      alert('Error starting PA system. Please check microphone permissions.');
-      await stopPA();
-    }
-  }
-
-  window.stopPA = async function() {
-    console.log('Stopping PA broadcast...');
-    activePAClass = null;
-    paBackReady = false;
-    paSenderIceBuffer = [];
-    updateSenderIntercomUI();
-    const statusEl = document.getElementById('intercomStatus');
-    if (statusEl) statusEl.textContent = 'Ready';
-
-    // Send hangup on back-channel (receiver is subscribed there)
-    if (paBackChannel) {
-      try { await paBackChannel.send({ type: 'broadcast', event: 'hangup', payload: {} }); } catch (e) {}
-      try { await sb.removeChannel(paBackChannel); } catch (e) {}
-      paBackChannel = null;
-    }
-    if (paOfferChannel) {
-      try { await sb.removeChannel(paOfferChannel); } catch (e) {}
-      paOfferChannel = null;
-    }
-    if (paLocalStream) {
-      paLocalStream.getTracks().forEach(t => t.stop());
-      paLocalStream = null;
-    }
-    if (paPeerConnection) {
-      paPeerConnection.close();
-      paPeerConnection = null;
+      console.error('PA mic error:', err);
+      alert('Could not access microphone. Please allow microphone access in your browser and try again.');
+      paTargetClass = null;
+      _updateSenderUI();
     }
   };
 
-  function updateSenderIntercomUI() {
-    const intercomGrid = document.getElementById('intercomSenderGrid');
-    if (!intercomGrid) return;
-    intercomGrid.querySelectorAll('.intercom-btn').forEach(btn => {
-      const cls = btn.getAttribute('data-class');
-      if (!cls) return;
-      if (activePAClass && activePAClass === cls) {
-        btn.className = 'intercom-btn active';
-        btn.innerHTML = '⏹ Stop PA';
-      } else {
-        btn.className = 'intercom-btn';
-        btn.innerHTML = `📢 ${cls}`;
+  window.stopAndSendPA = async function() {
+    if (!paRecorder || paRecorder.state === 'inactive' || !paRecording) return;
+
+    if (paRecordingTimer) { clearInterval(paRecordingTimer); paRecordingTimer = null; }
+    paRecording = false;
+    const target = paTargetClass;
+    paTargetClass = null;
+    paRecorder.stop();
+    _updateSenderUI();
+
+    // Wait a beat for the final ondataavailable chunk to arrive
+    await new Promise(r => setTimeout(r, 250));
+    if (paChunks.length === 0) return;
+
+    const statusEl = document.getElementById('intercomStatus');
+    if (statusEl) statusEl.textContent = `Sending to ${target}…`;
+
+    try {
+      const mimeType = paRecorder.mimeType || 'audio/webm';
+      const blob = new Blob(paChunks, { type: mimeType });
+      paChunks = [];
+
+      const audioData = await _blobToDataURL(blob);
+      const senderName = user.role === 'frontdesk' ? 'Front Desk'
+        : user.role === 'admin' ? 'Admin' : user.name;
+
+      const payload = {
+        id: 'pa_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        from: senderName,
+        audioData,
+        timestamp: new Date().toISOString()
+      };
+
+      const targetSlug = target.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      await _broadcastPANote(`pa_msg_${targetSlug}`, payload);
+
+      if (statusEl) {
+        statusEl.textContent = `✓ Voice note sent to ${target}!`;
+        setTimeout(() => { if (statusEl) statusEl.textContent = 'Ready — tap a room to record'; }, 4000);
       }
+    } catch (err) {
+      console.error('PA send error:', err);
+      const statusEl = document.getElementById('intercomStatus');
+      if (statusEl) {
+        statusEl.textContent = 'Send failed. Try again.';
+        setTimeout(() => { statusEl.textContent = 'Ready — tap a room to record'; }, 4000);
+      }
+    }
+  };
+
+  window.cancelPARecording = function() {
+    if (paRecordingTimer) { clearInterval(paRecordingTimer); paRecordingTimer = null; }
+    if (paRecorder && paRecorder.state !== 'inactive') paRecorder.stop();
+    paRecording = false;
+    paChunks = [];
+    paTargetClass = null;
+    _updateSenderUI();
+    const statusEl = document.getElementById('intercomStatus');
+    if (statusEl) statusEl.textContent = 'Ready — tap a room to record';
+  };
+
+  function _blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
   }
 
+  async function _broadcastPANote(channelName, payload) {
+    if (!sb || SUPABASE_URL.includes('YOUR')) {
+      console.warn('No Supabase connection — PA voice notes require a live connection.');
+      return;
+    }
+    const ch = sb.channel(channelName, { config: { broadcast: { self: false } } });
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('PA channel subscribe timeout')), 8000);
+      ch.subscribe(status => {
+        if (status === 'SUBSCRIBED') { clearTimeout(timer); resolve(); }
+        if (status === 'CHANNEL_ERROR') { clearTimeout(timer); reject(new Error('PA channel error')); }
+      });
+    });
+    await ch.send({ type: 'broadcast', event: 'voice_note', payload });
+    // Small delay to let Supabase flush the message before we close the channel
+    await new Promise(r => setTimeout(r, 600));
+    try { await sb.removeChannel(ch); } catch (e) {}
+  }
+
+  function _updateSenderUI() {
+    const controls = document.getElementById('paRecordingControls');
+    const helpText = document.getElementById('paIntercomHelp');
+    const grid = document.getElementById('intercomSenderGrid');
+
+    if (paRecording && paTargetClass) {
+      if (controls) controls.style.display = 'block';
+      if (helpText) helpText.style.display = 'none';
+      if (grid) grid.querySelectorAll('.intercom-btn').forEach(btn => {
+        const isActive = btn.getAttribute('data-class') === paTargetClass;
+        btn.classList.toggle('active', isActive);
+        btn.disabled = !isActive;
+        if (isActive) btn.textContent = `🎙 ${paTargetClass}`;
+      });
+    } else {
+      if (controls) controls.style.display = 'none';
+      if (helpText) helpText.style.display = 'block';
+      if (grid) grid.querySelectorAll('.intercom-btn').forEach(btn => {
+        const cls = btn.getAttribute('data-class') || '';
+        btn.classList.remove('active');
+        btn.disabled = false;
+        btn.textContent = `🎙️ ${cls}`;
+      });
+    }
+  }
+
   async function renderIntercomSender() {
-    const intercomGrid = document.getElementById('intercomSenderGrid');
-    if (!intercomGrid) return;
+    const grid = document.getElementById('intercomSenderGrid');
+    if (!grid) return;
 
     const allUsers = await getUsers();
     const classrooms = allUsers.filter(u => u.role === 'class');
     const targets = [];
 
-    if (user.role !== 'frontdesk') {
-      targets.push({ name: 'Front Desk', slug: 'front_desk' });
-    }
-    classrooms.forEach(c => {
-      if (c.name !== user.name) {
-        targets.push({ name: c.name, slug: c.name.toLowerCase().replace(/[^a-z0-9]/g, '_') });
-      }
-    });
+    if (user.role !== 'frontdesk') targets.push({ name: 'Front Desk' });
+    classrooms.forEach(c => { if (c.name !== user.name) targets.push({ name: c.name }); });
 
     if (!targets.length) {
-      intercomGrid.innerHTML = '<div class="intercom-help" style="grid-column: span 2; text-align: center; font-size: 0.8rem; color: var(--text-3);">No other active terminals.</div>';
+      grid.innerHTML = '<div class="intercom-help" style="grid-column:span 2;text-align:center;font-size:0.78rem;color:var(--text-3);">No classroom terminals registered yet.</div>';
       return;
     }
-    intercomGrid.innerHTML = targets.map(t => `
-      <button class="intercom-btn" data-class="${t.name}" onclick="togglePA('${t.name}')" id="btnPA_${t.slug}">
-        📢 ${t.name}
-      </button>
-    `).join('');
+
+    grid.innerHTML = targets.map(t => {
+      const slug = t.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      return `<button class="intercom-btn" data-class="${t.name}" onclick="startPARecording('${t.name}')" id="btnPA_${slug}">🎙️ ${t.name}</button>`;
+    }).join('');
   }
 
-  // ── PA Receiver ───────────────────────────────────────────────────
+  // ── Receiver Side ────────────────────────────────────────────────
+
   function initPAReceiver() {
     if (user.role !== 'class' && user.role !== 'frontdesk' && user.role !== 'admin') return;
-
-    // Only show the audio activation modal if the user hasn't already unlocked it.
-    // This prevents the popup from re-appearing on every channel reconnect.
-    if (!paAudioActivated) {
-      document.getElementById('paActivationModal').classList.remove('hidden');
-    }
+    if (!sb || SUPABASE_URL.includes('YOUR')) return;
 
     const mySlug = (user.role === 'frontdesk' ? 'Front Desk' : user.name)
       .toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const channelName = `intercom_${mySlug}`;
+    const channelName = `pa_msg_${mySlug}`;
     console.log(`PA Receiver listening on: ${channelName}`);
 
-    // Clean up any stale receiver channel before re-subscribing
     if (paReceiverChannel) {
       try { sb.removeChannel(paReceiverChannel); } catch (e) {}
       paReceiverChannel = null;
     }
 
-    paReceiverChannel = sb.channel(channelName, {
-      config: { broadcast: { self: false } }
-    });
-
+    paReceiverChannel = sb.channel(channelName, { config: { broadcast: { self: false } } });
     paReceiverChannel
-      .on('broadcast', { event: 'offer' }, async ({ payload }) => {
-        console.log('Incoming call from:', payload.senderName);
-        const { sdp, senderName, replyTo } = payload;
-
-        // Keep screen alive in background tabs (if supported)
-        if ('wakeLock' in navigator) {
-          try { await navigator.wakeLock.request('screen'); } catch (e) {}
-        }
-
-        // Notify if tab is not visible
-        if (document.hidden) {
-          startTabAlert(`📞 Incoming call from ${senderName || 'Intercom'}!`);
-          showBrowserNotification(
-            `📢 Incoming Intercom Call`,
-            `${senderName || 'Someone'} is calling — tap to answer`,
-            () => window.focus()
-          );
-        }
-
-        // Show overlay
-        const overlay = document.getElementById('paOverlay');
-        if (overlay) {
-          overlay.classList.remove('hidden');
-          const sub = document.getElementById('paOverlaySub');
-          if (sub) sub.textContent = `Live call from ${senderName || 'Intercom'}...`;
-        }
-
-        // Cleanup any lingering state from a previous call
-        _cleanupReplyChannel();
-        if (incomingPeerConnection) {
-          incomingPeerConnection.close();
-          incomingPeerConnection = null;
-        }
-
-        replyIceBuffer = [];
-        replyChannelReady = false;
-        incomingPeerConnection = new RTCPeerConnection(stunConfig);
-
-        incomingPeerConnection.ontrack = (event) => {
-          console.log('Audio track received');
-          const paAudio = document.getElementById('paAudio');
-          if (paAudio) {
-            paAudio.srcObject = event.streams[0];
-            paAudio.play().catch(e => console.error('Audio play failed:', e));
-          }
-        };
-
-        incomingPeerConnection.onconnectionstatechange = () => {
-          const s = incomingPeerConnection?.connectionState;
-          console.log('Receiver WebRTC state:', s);
-          if (s === 'failed' || s === 'disconnected') cleanupReceiverPA();
-        };
-
-        incomingPeerConnection.onicecandidate = (event) => {
-          if (!event.candidate) return;
-          if (replyChannelReady && currentReplyChannel) {
-            currentReplyChannel.send({ type: 'broadcast', event: 'candidate', payload: { candidate: event.candidate } });
-          } else {
-            replyIceBuffer.push(event.candidate);
-          }
-        };
-
-        try {
-          await incomingPeerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
-          const answer = await incomingPeerConnection.createAnswer();
-          await incomingPeerConnection.setLocalDescription(answer);
-
-          // Subscribe to the sender's unique back-channel to reply
-          currentReplyChannel = sb.channel(replyTo, {
-            config: { broadcast: { self: false } }
-          });
-
-          currentReplyChannel
-            .on('broadcast', { event: 'sender_candidate' }, async ({ payload }) => {
-              if (incomingPeerConnection && payload.candidate) {
-                try {
-                  await incomingPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
-                } catch (e) { console.error('addIceCandidate (sender→receiver) failed:', e); }
-              }
-            })
-            .on('broadcast', { event: 'hangup' }, () => {
-              console.log('Sender ended the call.');
-              cleanupReceiverPA();
-            })
-            .subscribe(async (status) => {
-              if (status !== 'SUBSCRIBED') return;
-              replyChannelReady = true;
-              console.log(`Reply channel ${replyTo} ready`);
-
-              // Send the answer
-              await currentReplyChannel.send({
-                type: 'broadcast', event: 'answer',
-                payload: { sdp: answer }
-              });
-
-              // Flush buffered receiver ICE candidates
-              for (const candidate of replyIceBuffer) {
-                await currentReplyChannel.send({ type: 'broadcast', event: 'candidate', payload: { candidate } });
-              }
-              replyIceBuffer = [];
-            });
-
-          updateReceiverUI(true);
-
-        } catch (err) {
-          console.error('Error responding to PA offer:', err);
-          cleanupReceiverPA();
-        }
+      .on('broadcast', { event: 'voice_note' }, ({ payload }) => {
+        console.log('Incoming PA voice note from:', payload.from);
+        _receivePANote(payload);
       })
-      .subscribe((status) => {
-        console.log(`PA Receiver channel [${channelName}] status: ${status}`);
-        // Auto-reconnect if the Supabase connection drops
+      .subscribe(status => {
+        console.log(`PA Receiver [${channelName}]: ${status}`);
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.warn('Receiver channel lost. Reconnecting in 3 s...');
-          setTimeout(() => initPAReceiver(), 3000);
+          console.warn('PA receiver channel lost — reconnecting in 4s…');
+          setTimeout(initPAReceiver, 4000);
         }
       });
   }
 
-  function _cleanupReplyChannel() {
-    if (currentReplyChannel) {
-      try { sb.removeChannel(currentReplyChannel); } catch (e) {}
-      currentReplyChannel = null;
-      replyChannelReady = false;
-      replyIceBuffer = [];
-    }
+  function _receivePANote(payload) {
+    pendingPAData = payload.audioData;
+
+    playGong();
+    startTabAlert(`📢 PA from ${payload.from}`);
+    showBrowserNotification(
+      `📢 Voice note from ${payload.from}`,
+      'Tap to open and play',
+      () => { window.focus(); playPendingPA(); }
+    );
+
+    const overlay = document.getElementById('paOverlay');
+    const sub = document.getElementById('paOverlaySub');
+    const playBtn = document.getElementById('paPlayBtn');
+    const visualizer = document.getElementById('paVisualizer');
+
+    if (overlay) overlay.classList.remove('hidden');
+    if (sub) sub.textContent = `Voice note from ${payload.from || 'PA System'}`;
+    if (playBtn) playBtn.style.display = 'none';
+    if (visualizer) visualizer.style.display = 'flex';
+
+    updateReceiverUI(true);
+
+    if (paCurrentAudio) { try { paCurrentAudio.pause(); } catch (e) {} }
+    paCurrentAudio = new Audio(payload.audioData);
+    paCurrentAudio.onended = () => { pendingPAData = null; cleanupReceiverPA(); };
+    paCurrentAudio.onerror = () => {
+      if (playBtn) playBtn.style.display = 'inline-flex';
+      if (visualizer) visualizer.style.display = 'none';
+      if (sub) sub.textContent = `Voice note from ${payload.from} — tap ▶ to play`;
+    };
+    paCurrentAudio.play().catch(() => {
+      console.log('PA autoplay blocked — showing Play button');
+      if (playBtn) playBtn.style.display = 'inline-flex';
+      if (visualizer) visualizer.style.display = 'none';
+      if (sub) sub.textContent = `Voice note from ${payload.from} — tap ▶ to play`;
+    });
   }
+
+  window.playPendingPA = function() {
+    if (!pendingPAData) return;
+    const playBtn = document.getElementById('paPlayBtn');
+    const visualizer = document.getElementById('paVisualizer');
+
+    if (playBtn) playBtn.style.display = 'none';
+    if (visualizer) visualizer.style.display = 'flex';
+
+    if (paCurrentAudio) { try { paCurrentAudio.pause(); } catch (e) {} }
+    paCurrentAudio = new Audio(pendingPAData);
+    paCurrentAudio.onended = () => { pendingPAData = null; cleanupReceiverPA(); };
+    paCurrentAudio.play().catch(e => console.error('Manual PA play failed:', e));
+  };
 
   function cleanupReceiverPA() {
     stopTabAlert();
+    pendingPAData = null;
+    if (paCurrentAudio) { try { paCurrentAudio.pause(); } catch (e) {} paCurrentAudio = null; }
     const overlay = document.getElementById('paOverlay');
     if (overlay) overlay.classList.add('hidden');
-    const paAudio = document.getElementById('paAudio');
-    if (paAudio) paAudio.srcObject = null;
-    if (incomingPeerConnection) {
-      incomingPeerConnection.close();
-      incomingPeerConnection = null;
-    }
-    _cleanupReplyChannel();
+    const playBtn = document.getElementById('paPlayBtn');
+    if (playBtn) playBtn.style.display = 'none';
     updateReceiverUI(false);
   }
 
-  // Global hang-up: works for both sender and receiver
-  window.hangUpCall = async function() {
-    if (activePAClass) {
-      await stopPA();
-    } else {
-      cleanupReceiverPA();
-    }
-  };
+  window.hangUpCall = function() { cleanupReceiverPA(); };
 
-  function updateReceiverUI(isBroadcasting) {
-    const indicator = document.getElementById('paReceiverPulse');
-    const text = document.getElementById('paReceiverText');
-    if (!indicator || !text) return;
-    if (isBroadcasting) {
-      indicator.className = 'pulse-indicator red';
-      text.textContent = '📢 RECEIVING LIVE BROADCAST';
-      text.style.color = '#e74c3c';
+  function updateReceiverUI(isReceiving) {
+    const dot = document.getElementById('paReceiverPulse');
+    const txt = document.getElementById('paReceiverText');
+    if (!dot || !txt) return;
+    if (isReceiving) {
+      dot.className = 'pulse-indicator red';
+      txt.textContent = '📢 RECEIVING VOICE NOTE';
+      txt.style.color = '#e74c3c';
     } else {
-      indicator.className = 'pulse-indicator green';
-      text.textContent = 'PA System Active & Listening';
-      text.style.color = '';
+      dot.className = 'pulse-indicator green';
+      txt.textContent = 'PA System Active & Listening';
+      txt.style.color = '';
     }
   }
 
-  window.activatePAAudio = function() {
-    const paAudio = document.getElementById('paAudio');
-    if (paAudio) {
-      paAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-      paAudio.play().then(() => {
-        console.log('PA audio unlocked.');
-        paAudioActivated = true; // Mark as activated so the modal never re-appears
-        document.getElementById('paActivationModal').classList.add('hidden');
-      }).catch(err => {
-        console.error('Error unlocking PA audio:', err);
-        alert('Autoplay unlock failed. Please click the button again or refresh.');
-      });
-    }
-  };
+  // ── Intercom Init ─────────────────────────────────────────────────
 
-  // Render intercom controls based on role
   const intercomWidget = document.getElementById('intercomWidget');
   const intercomSenderControls = document.getElementById('intercomSenderControls');
   const intercomReceiverStatus = document.getElementById('intercomReceiverStatus');
@@ -3120,3 +3001,4 @@ if (isDashboard) {
     }
   }
 }
+

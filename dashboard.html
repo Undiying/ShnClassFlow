@@ -41,19 +41,30 @@
         <span class="intercom-icon">🎙️</span> School PA Intercom
       </div>
       <div class="intercom-body">
-        <!-- Front Desk & Admin Controls -->
+        <!-- Sender Controls -->
         <div id="intercomSenderControls" style="display:none">
-          <p class="intercom-help">Select a classroom to broadcast live voice:</p>
+          <p class="intercom-help" id="paIntercomHelp">Tap a room to record a voice note:</p>
           <div class="intercom-grid" id="intercomSenderGrid">
-            <!-- Rendered dynamically matching registered classrooms -->
+            <!-- Rendered dynamically -->
           </div>
-          <div id="intercomStatus" class="intercom-status-text">Ready</div>
+          <!-- Recording controls: shown while actively recording -->
+          <div id="paRecordingControls" style="display:none; margin-top:8px;">
+            <div class="pa-recording-indicator">
+              <span class="pulse-indicator red"></span>
+              <span id="paRecordingTimer">Recording... 0s</span>
+            </div>
+            <div style="display:flex; gap:6px; margin-top:8px;">
+              <button id="paSendBtn" onclick="stopAndSendPA()" class="pa-action-btn send">📤 Send</button>
+              <button id="paCancelBtn" onclick="cancelPARecording()" class="pa-action-btn cancel">✕ Cancel</button>
+            </div>
+          </div>
+          <div id="intercomStatus" class="intercom-status-text">Ready — tap a room to record</div>
         </div>
-        <!-- Classroom Status -->
+        <!-- Receiver Status -->
         <div id="intercomReceiverStatus" style="display:none">
           <div class="intercom-status-indicator">
             <span class="pulse-indicator green" id="paReceiverPulse"></span>
-            <span id="paReceiverText">PA System Active & Listening</span>
+            <span id="paReceiverText">PA System Active &amp; Listening</span>
           </div>
         </div>
       </div>
@@ -406,36 +417,18 @@
     </div>
   </div>
 
-  <!-- WebRTC Audio for PA System -->
-  <audio id="paAudio" autoplay style="display:none"></audio>
-
   <!-- PA Active Overlay for Classroom -->
   <div id="paOverlay" class="pa-overlay hidden">
     <div class="pa-overlay-content">
       <span class="pa-overlay-icon">📢</span>
-      <h1 class="pa-overlay-title">LIVE PA ANNOUNCEMENT</h1>
-      <p class="pa-overlay-sub" id="paOverlaySub">Broadcasting live audio from Front Desk...</p>
-      <div class="pa-visualizer">
+      <h1 class="pa-overlay-title">VOICE NOTE</h1>
+      <p class="pa-overlay-sub" id="paOverlaySub">Incoming voice note from Front Desk...</p>
+      <div class="pa-visualizer" id="paVisualizer">
         <span></span><span></span><span></span><span></span><span></span>
       </div>
-      <button class="pa-hangup-btn" id="paHangupBtn" onclick="hangUpCall()">📵 Hang Up</button>
-    </div>
-  </div>
-
-  <!-- PA Activation Modal for Classroom -->
-  <div id="paActivationModal" class="modal-overlay hidden">
-    <div class="modal small" style="max-width: 400px;">
-      <div class="modal-header">
-        <h2>School PA System Setup</h2>
-      </div>
-      <div class="modal-body" style="text-align: center; padding: 20px;">
-        <p style="margin-bottom: 20px; font-size: 1rem; line-height: 1.5; color: var(--text-2);">
-          Modern web browsers require a manual click to enable audio playback before we can play live PA announcements.
-        </p>
-        <button class="btn-primary full" id="btnActivatePA" onclick="activatePAAudio()" style="font-size: 1.1rem; padding: 12px 24px; border-radius: 8px;">
-          🔊 Enable School PA System
-        </button>
-      </div>
+      <!-- Play button shown if browser blocks autoplay -->
+      <button class="pa-hangup-btn" id="paPlayBtn" onclick="playPendingPA()" style="display:none; background:#27ae60; border-color:rgba(255,255,255,0.3);">▶ Play Voice Note</button>
+      <button class="pa-hangup-btn" id="paHangupBtn" onclick="hangUpCall()" style="margin-top:10px;">✕ Dismiss</button>
     </div>
   </div>
 
