@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 //  ClassFlow — app.js
 //  Handles auth, state, calendar rendering, booking logic
 // ============================================================
@@ -62,7 +62,7 @@ async function saveSessions(sessions) {
     return;
   }
   const cleanSessions = sessions.map(s => {
-    const { type, ...rest } = s;
+    const { type, teacherIds, ...rest } = s;
     if (!rest.date || rest.date === '') rest.date = '2000-01-01'; // Satisfy NOT NULL constraint
     return rest;
   });
